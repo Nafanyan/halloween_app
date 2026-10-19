@@ -5,6 +5,8 @@ import { AdminGrid } from './AdminGrid';
 import { QuestionControls } from './QuestionControls';
 import { PlayersPanel } from './PlayersPanel';
 import { ShopPanel } from './ShopPanel';
+import { GamesList } from './GamesList';
+import { GameEditor } from './GameEditor';
 import { call } from './adminApi';
 import './admin.css';
 
@@ -14,6 +16,7 @@ export function AdminPage() {
   const [authed, setAuthed] = useState(false);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [tab, setTab] = useState<'host' | 'games'>('host');
 
   const auth = (p: string, manual: boolean) => {
     socket.emit('admin:auth', { pin: p }, (res) => {
@@ -63,21 +66,29 @@ export function AdminPage() {
   return (
     <main className="admin">
       <h1>Ведущий</h1>
-      {view.phase === 'lobby' && (
-        <section className="card">
-          <h2>Лобби</h2>
-          <p>{view.players.length ? view.players.map((p) => p.name).join(', ') : 'Игроков пока нет'}</p>
-          <button className="btn" onClick={() => call('admin:startGame')}>Начать игру</button>
-        </section>
-      )}
-      {view.phase === 'game' && (
+      <nav className="admin-tabs">
+        <button className={tab === 'host' ? 'active' : ''} onClick={() => setTab('host')}>Ведущий</button>
+        <button className={tab === 'games' ? 'active' : ''} onClick={() => setTab('games')}>Игры</button>
+      </nav>
+      {tab === 'host' ? (
         <>
-          {view.activeQuestion && <QuestionControls view={view} />}
-          <AdminGrid view={view} />
+        {view.phase === 'lobby' && (
+          <section className="card">
+            <h2>Лобби</h2>
+            <p>{view.players.length ? view.players.map((p) => p.name).join(', ') : 'Игроков пока нет'}</p>
+            <button className="btn" onClick={() => call('admin:startGame')}>Начать игру</button>
+          </section>
+        )}
+        {view.phase === 'game' && (
+          <>
+            {view.activeQuestion && <QuestionControls view={view} />}
+            <AdminGrid view={view} />
+          </>
+        )}
+        <PlayersPanel view={view} />
+        <ShopPanel view={view} />
         </>
-      )}
-      <PlayersPanel view={view} />
-      <ShopPanel view={view} />
+      ) : view.editing ? <GameEditor edit={view.editing} /> : <GamesList view={view} />}
       {toast && <div className="admin-toast">{toast}</div>}
     </main>
   );

@@ -13,6 +13,11 @@ const MESSAGES: Partial<Record<ErrorCode, string>> = {
   INVALID_ITEM: 'Проверьте поля предмета',
   SOLD_OUT: 'Предмет распродан',
   NOT_ENOUGH_POINTS: 'Не хватает очков',
+  NO_QUESTIONS: 'В игре нет вопросов',
+  GAME_BROKEN: 'Игра повреждена — исправьте game.json',
+  GAME_ACTIVE: 'Нельзя удалить активную игру',
+  INVALID_SETTINGS: 'Проверьте поля настроек',
+  SAVE_FAILED: 'Не удалось сохранить',
 };
 
 export const errorMessage = (code: ErrorCode): string => MESSAGES[code] ?? 'Ошибка';
@@ -42,13 +47,13 @@ export function useToast(): string | null {
   return t;
 }
 
-type Res = { ok: true } | { ok: false; error: ErrorCode };
+type Res = { ok: true; id?: string } | { ok: false; error: ErrorCode };
 
 /** Emit an admin event; show an error toast if the ack reports failure, else run onOk; onDone runs after any ack. */
-export function call(event: string, payload?: object, onOk?: () => void, onDone?: () => void): void {
+export function call(event: string, payload?: object, onOk?: (res: { ok: true; id?: string }) => void, onDone?: () => void): void {
   const ack = (res: Res) => {
     if (!res.ok) showToast(errorMessage(res.error));
-    else onOk?.();
+    else onOk?.(res);
     onDone?.();
   };
   const emit = socket.emit.bind(socket) as (...a: unknown[]) => void;
@@ -73,16 +78,22 @@ export function savePin(pin: string | null): void {
   } catch { /* ignore */ }
 }
 
-/** Upload a (downscaled) image; resolves with its /media URL. */
-export async function uploadImage(blob: Blob): Promise<string> {
+export function uploadErrorMessage(status: number | undefined): string {
+  if (status === 413) return 'Файл слишком большой';
+  if (status === 415) return 'Этот формат не подходит';
+  if (status === 401) return 'Нет доступа';
+  return 'Не удалось загрузить файл';
+}
+
+/** Upload a media file into a game; resolves with the stored file name and its /media URL. */
+export async function uploadMedia(gameId: string, blob: Blob): Promise<{ file: string; url: string }> {
   const pin = loadPin();
-  if (!pin) throw new Error('no pin');
-  const res = await fetch('/api/shop/image', {
+  if (!pin) throw Object.assign(new Error('no pin'), { status: 401 });
+  const res = await fetch(`/api/games/${gameId}/media`, {
     method: 'POST',
-    headers: { 'X-Admin-Pin': pin, 'Content-Type': blob.type || 'image/jpeg' },
+    headers: { 'X-Admin-Pin': pin, 'Content-Type': blob.type || 'application/octet-stream' },
     body: blob,
   });
   if (!res.ok) throw Object.assign(new Error(`upload failed: ${res.status}`), { status: res.status });
-  const { url } = (await res.json()) as { url: string };
-  return url;
+  return (await res.json()) as { file: string; url: string };
 }

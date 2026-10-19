@@ -1,15 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import type { AdminShopItem } from '@quiz/shared';
-import { call, parseNum, showToast, uploadImage } from './adminApi';
+import { call, parseNum, showToast, uploadErrorMessage, uploadMedia } from './adminApi';
 import { downscaleImage } from './image';
 
-export function ItemForm({ initial, onDone }: { initial?: AdminShopItem; onDone: () => void }) {
+export function ItemForm({ gameId, initial, onDone }: { gameId: string; initial?: AdminShopItem; onDone: () => void }) {
   const [name, setName] = useState(initial?.name ?? '');
   const [description, setDescription] = useState(initial?.description ?? '');
   const [price, setPrice] = useState(String(initial?.price ?? 100));
   const [quantity, setQuantity] = useState(String(initial?.quantity ?? 1));
   const [hidden, setHidden] = useState(initial?.hidden ?? false);
   const [image, setImage] = useState<string | undefined>(initial?.image);
+  const [imageUrl, setImageUrl] = useState<string | undefined>(initial?.imageUrl);
   const [uploading, setUploading] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -17,18 +18,19 @@ export function ItemForm({ initial, onDone }: { initial?: AdminShopItem; onDone:
     if (!file) return;
     setUploading(true);
     try {
-      let blob: Blob;
+      let blob: Blob = file;
       try {
-        blob = await downscaleImage(file);
+        if (file.type !== 'image/svg+xml') blob = await downscaleImage(file);
       } catch {
         showToast('Не удалось прочитать фото');
         return;
       }
       try {
-        setImage(await uploadImage(blob));
+        const res = await uploadMedia(gameId, blob);
+        setImage(res.file);
+        setImageUrl(res.url);
       } catch (err) {
-        const status = (err as { status?: number }).status;
-        showToast(status === 413 ? 'Фото слишком большое' : status === 401 ? 'Нет доступа' : 'Не удалось загрузить фото');
+        showToast(uploadErrorMessage((err as { status?: number }).status));
       }
     } finally {
       setUploading(false);
@@ -48,12 +50,12 @@ export function ItemForm({ initial, onDone }: { initial?: AdminShopItem; onDone:
     const onOk = () => {
       if (initial) onDone();
       else {
-        setName(''); setDescription(''); setPrice('100'); setQuantity('1'); setHidden(false); setImage(undefined);
+        setName(''); setDescription(''); setPrice('100'); setQuantity('1'); setHidden(false); setImage(undefined); setImageUrl(undefined);
       }
     };
     const done = () => setPending(false);
-    if (initial) call('admin:itemUpdate', { id: initial.id, item }, onOk, done);
-    else call('admin:itemAdd', { item }, onOk, done);
+    if (initial) call('admin:itemUpdate', { gameId, id: initial.id, item }, onOk, done);
+    else call('admin:itemAdd', { gameId, item }, onOk, done);
   };
 
   return (
@@ -61,10 +63,10 @@ export function ItemForm({ initial, onDone }: { initial?: AdminShopItem; onDone:
       <h3>{initial ? 'Изменить предмет' : 'Новый предмет'}</h3>
       <input type="file" accept="image/*" disabled={uploading} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
       {uploading && <span className="muted">Загрузка фото…</span>}
-      {image && (
+      {image && imageUrl && (
         <div className="admin-row">
-          <img className="item-thumb" src={image} alt="" />
-          <button type="button" className="btn" onClick={() => setImage(undefined)}>Убрать фото</button>
+          <img className="item-thumb" src={imageUrl} alt="" />
+          <button type="button" className="btn" onClick={() => { setImage(undefined); setImageUrl(undefined); }}>Убрать фото</button>
         </div>
       )}
       <input type="text" placeholder="Название" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
