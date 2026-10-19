@@ -1,0 +1,44 @@
+.screen { --frame: 0.45vw; height: 100vh; overflow: hidden; box-sizing: border-box; padding: 3vh 3vw; font-size: 2.2vw; display: flex; flex-direction: column; }
+.screen h1 { font-size: 5vw; margin: 0 0 1vh; text-align: center; line-height: 1.05; }
+.screen h2 { font-size: 3vw; margin: 0 0 2vh; }
+.screen-start { align-items: center; justify-content: center; }
+.screen-start-btn { font-size: 3.4vw; padding: 0.5em 1.6em; }
+.off { opacity: 0.4; }
+
+.lobby { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.lobby-sub { text-align: center; font-size: 3.4vw; margin: 0 0 2vh; color: var(--ember); }
+.lobby-row { flex: 1; min-height: 0; display: flex; gap: 4vw; align-items: center; justify-content: center; }
+.lobby-qr { flex: none; max-width: 42vw; text-align: center; }
+/* White stays inside the gold frame so phones can still read the code. */
+.qr-box { --frame: 0.6vw; display: inline-block; padding: calc(var(--frame) + 1.4vh); border-radius: 18px; }
+.qr-box svg { display: block; background: #fff; padding: 1.4vh; border-radius: 6px; box-sizing: content-box; }
+.join-url { margin-top: 2vh; font-size: 2vw; color: var(--gold); word-break: break-all; letter-spacing: 0.04em; }
+/* Bounded height + columns: the list never pushes the QR off screen. */
+.lobby-players { flex: 1; min-width: 0; max-height: 75vh; overflow: hidden; }
+.lobby-players ul { list-style: none; margin: 0; padding: 0; font-size: 2.8vw; font-weight: 600; columns: 3; column-gap: 2.5vw; }
+.lobby-players li { margin: 0 0 0.3em; break-inside: avoid; display: flex; align-items: center; gap: 0.3em; }
+.lobby-name { min-width: 0; overflow-wrap: anywhere; }
+
+.screen-game { gap: 2vh; }
+.grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.screen .round-name { font-size: 4.4vw; margin: -1vh 0 1vh; }
+.grid { display: grid; gap: 1vw; flex: 1; min-height: 0; padding: 0.5vw; }
+.grid-theme { min-height: 0; overflow: hidden; padding: 0.6vh 1.2vw 0.6vh 0; font-size: 2.6vw; line-height: 1.1; overflow-wrap: anywhere; display: flex; align-items: center; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9); border-bottom: 1px solid rgba(201, 162, 74, 0.35); }
+.grid-cell { min-height: 0; display: flex; align-items: center; justify-content: center; color: var(--gold); font-family: var(--display); font-size: 3.8vw; text-shadow: 0 0 14px rgba(232, 163, 61, 0.55); }
+.grid-cell:nth-child(odd) { transform: rotate(-0.7deg); }
+.grid-cell:nth-child(even) { transform: rotate(0.7deg); }
+.grid-cell.played { background: rgba(18, 13, 11, 0.35); border-color: rgba(201, 162, 74, 0.2); box-shadow: none; transform: none; }
+
+/* Font shrinks with player count (set inline, never below 2.2vw); capped height keeps the grid on screen. */
+.scoreboard { flex: none; display: flex; flex-wrap: wrap; gap: 0.8vw; justify-content: center; max-height: 28vh; overflow: hidden; }
+.score { background: rgba(26, 18, 16, 0.85); border: 1px solid var(--gold-dim); border-radius: 10px; padding: 0.3vh 1vw; display: flex; gap: 0.7vw; align-items: center; font-size: var(--score-size, 3vw); font-weight: 600; line-height: 1.15; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5); }
+.score-name { max-width: 24vw; overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.score-name.long { font-size: 0.75em; max-width: 26vw; -webkit-line-clamp: 3; }
+.score.off { opacity: 0.4; filter: grayscale(1); }
+.score-pts { color: var(--gold); font-family: var(--display); }
+
+.question { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; text-align: center; }
+.question-head { font-size: 2.6vw; }
+.question-text { font-size: 4.6vw; font-weight: 600; line-height: 1.2; max-width: 90vw; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
+.question-img { max-width: 80vw; max-height: 45vh; border: 4px solid var(--gold); border-radius: 16px; box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6); transform: rotate(-1deg); }
+.answering { --frame: 0.5vw; padding: calc(var(--frame) + 1.4vh) calc(var(--frame) + 3vw); font-family: var(--display); font-size: 4vw; color: var(--ember); animation: candle 2s ease-in-out infinite; }

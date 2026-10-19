@@ -1,0 +1,22 @@
+{
+  "name": "quiz-buzzer",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "dev": "concurrently \"tsx watch server/src/index.ts\" \"npm run dev -w client\"",
+    "build": "npm run build -w client",
+    "start": "npm run build && tsx server/src/index.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

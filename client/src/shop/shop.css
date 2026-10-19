@@ -1,0 +1,52 @@
+.shop-card { --frame: 0.3vw; container-type: inline-size; position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: calc(var(--frame) + 0.5vw) calc(var(--frame) + 0.6vw); gap: 0.4vw; text-align: center; color: var(--text); }
+.shop-photo { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 6px; }
+.shop-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ornament { width: 70%; height: 70%; max-width: 100%; max-height: 100%; filter: drop-shadow(0 0 6px rgba(232, 163, 61, 0.4)); }
+.shop-name { flex: none; font-family: var(--display); color: var(--gold); font-size: clamp(14px, 1.7vw, 40px); line-height: 1.1; overflow-wrap: anywhere; }
+.shop-desc { flex: none; font-size: 1.2em; line-height: 1.2; color: var(--text); overflow-wrap: anywhere; }
+.shop-meta { flex: none; display: flex; justify-content: center; align-items: baseline; gap: 0.8vw; flex-wrap: wrap; }
+.shop-price { font-family: var(--display); color: var(--ember); font-size: clamp(14px, 1.6vw, 36px); }
+.shop-left { color: var(--muted); font-size: clamp(12px, 1.2vw, 28px); }
+
+.card-back { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; gap: 0.2vw; }
+.card-back .ornament { position: absolute; inset: 0; margin: auto; width: 88%; height: 88%; opacity: 0.55; }
+.back-mark { position: relative; font-family: var(--display); color: var(--gold); font-size: clamp(30px, 5vw, 140px); line-height: 1; text-shadow: 0 0 16px rgba(232, 163, 61, 0.7); }
+.back-caption { position: relative; font-size: clamp(16px, 2vw, 56px); color: var(--ember); line-height: 1; }
+.card-back .shop-price { position: relative; }
+
+.shop-card.sold { filter: grayscale(0.7) brightness(0.55); }
+.stamp { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-14deg); padding: 0.1em 0.5em; border: 3px double var(--blood); color: #ff8a70; background: rgba(18, 13, 11, 0.85); font-family: var(--display); font-size: min(clamp(16px, 2.2vw, 56px), 12cqw); text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap; }
+
+/* TV showcase: fills the space above the scoreboard, never scrolls. */
+.showcase-tv { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1vh; }
+.showcase-title { flex: none; margin: 0; text-align: center; font-size: 3.6vw; line-height: 1.1; }
+.showcase-empty { text-align: center; font-size: 4vw; color: var(--ember); margin: 4vh 0; }
+.showcase-tv .showcase-grid { flex: 1; min-height: 0; display: grid; gap: 1vw; padding: 0.5vw; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); grid-template-rows: repeat(var(--rows), minmax(0, 1fr)); }
+.showcase-tv .shop-card { --frame: 0.25vw; padding: calc(var(--frame) + 0.4vw); gap: 0.3vw; }
+.showcase-tv .shop-name { font-size: clamp(12px, calc(2.4vw - var(--cols) * 0.16vw), 40px); }
+.showcase-tv .shop-price { font-size: clamp(12px, calc(2vw - var(--cols) * 0.14vw), 34px); }
+
+/* Phone: two columns, scrollable page. */
+.showcase-phone { display: flex; flex-direction: column; gap: 10px; }
+.showcase-phone .showcase-title { font-size: 34px; }
+.showcase-phone .showcase-empty { font-size: 30px; }
+.showcase-phone .showcase-grid, .trophy-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.shop-card.shop-phone, .shop-card.shop-reveal { --frame: 5px; padding: calc(var(--frame) + 8px); gap: 6px; }
+.shop-phone .shop-photo { flex: none; aspect-ratio: 1; }
+.shop-phone .card-back { aspect-ratio: 1; flex: none; }
+.shop-phone .shop-name { font-size: 18px; }
+.shop-phone .shop-desc { font-size: 16px; }
+.shop-phone .shop-price { font-size: 17px; }
+.shop-phone .shop-left { font-size: 14px; }
+.shop-phone .back-mark { font-size: 54px; }
+.shop-phone .back-caption { font-size: 24px; }
+.shop-phone .stamp { font-size: 18px; }
+
+/* Reveal face (Task 10): larger type for the TV overlay. */
+.shop-reveal .shop-name { font-size: clamp(22px, 3vw, 72px); }
+.shop-reveal .shop-desc { font-size: clamp(16px, 1.8vw, 44px); }
+.shop-reveal .shop-price { font-size: clamp(18px, 2.2vw, 52px); }
+
+.trophies { margin: 4px 0; }
+.trophies summary { cursor: pointer; font-family: var(--display); color: var(--gold); font-size: 20px; padding: 8px 0; }
+.trophies .trophy-list { padding-top: 8px; }

@@ -1,0 +1,96 @@
+/* Look borrowed from the «Сумеречный шабаш» invitation: Bilibin tapestry under a dark veil,
+   gold-foil headings (Yeseva One), Cormorant Garamond text, Great Vibes script accents,
+   and tarot-like cards with a double gold frame. */
+:root {
+  --bg: #1a1210;
+  --bg-2: #3a1712;
+  --veil: rgba(18, 13, 11, 0.85);
+  --gold: #c9a24a;
+  --gold-dim: #7a6232;
+  --ember: #e8a33d;
+  --blood: #7a1c14;
+  --text: #ece2cc;
+  --muted: #968870;
+  --serif: 'Cormorant Garamond', Georgia, serif;
+  --display: 'Yeseva One', Georgia, serif;
+  --script: 'Great Vibes', 'Brush Script MT', cursive;
+  --frame: 6px; /* gap between outer border and inner gold line of a card */
+}
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; }
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 500;
+}
+/* A fixed layer instead of background-attachment: fixed, which mobile Safari ignores. */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(rgba(18, 13, 11, 0.94) 0%, rgba(18, 13, 11, 0.85) 28%, rgba(18, 13, 11, 0.62) 55%, rgba(18, 13, 11, 0.88) 100%),
+    url('./assets/tapestry.jpg') center / cover no-repeat;
+}
+#root { position: relative; z-index: 1; }
+
+/* Gold-foil headings, as on the invitation title. */
+h1, h2, h3 {
+  font-family: var(--display);
+  font-weight: 400;
+  color: var(--gold);
+  background: var(--gold) url('./assets/gold.jpg') center / cover;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.7));
+}
+.script { font-family: var(--script); font-weight: 400; color: var(--gold); letter-spacing: 0; }
+.label { font-family: var(--serif); font-weight: 700; text-transform: uppercase; letter-spacing: 0.18em; color: var(--gold); }
+
+/* Tarot card from slide 2: maroon glow, outer gold border, dark gap, inner gold line, deep shadow. */
+.tarot, .card {
+  background: radial-gradient(circle at 50% 45%, var(--bg-2) 0%, var(--bg) 70%);
+  border: 3px solid var(--gold);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 var(--frame) var(--bg),
+    inset 0 0 0 calc(var(--frame) + 2px) var(--gold),
+    0 18px 36px rgba(0, 0, 0, 0.6);
+}
+.card { padding: calc(var(--frame) + 14px) calc(var(--frame) + 18px); }
+
+.btn {
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--bg);
+  background: linear-gradient(180deg, #e6c473 0%, var(--gold) 50%, #9c7a32 100%);
+  border: 2px solid #5e4a22;
+  border-radius: 10px;
+  padding: 0.5em 1.2em;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 240, 200, 0.5);
+  transition: filter 0.15s, box-shadow 0.15s;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 0 18px rgba(232, 163, 61, 0.45), inset 0 1px 0 rgba(255, 240, 200, 0.5); }
+.btn:disabled { background: #3a2f22; color: var(--muted); border-color: #2a2118; box-shadow: none; cursor: not-allowed; }
+.btn.danger { background: linear-gradient(180deg, #9a2a1e 0%, var(--blood) 100%); color: var(--text); border-color: #3a0d09; }
+
+input:not([type]), input[type='text'], input[type='password'], input[type='number'] {
+  font: inherit; color: var(--text); background: rgba(18, 13, 11, 0.8);
+  border: 2px solid var(--gold-dim); border-radius: 10px; padding: 0.4em 0.6em; min-width: 0;
+}
+input:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 12px rgba(201, 162, 74, 0.35); }
+
+.offline {
+  position: fixed; top: 8px; right: 8px; z-index: 100;
+  background: var(--blood); color: var(--text); border: 1px solid var(--gold);
+  padding: 0.4em 0.9em; border-radius: 8px; font-size: 15px;
+}
+
+@keyframes candle {
+  0%, 100% { box-shadow: inset 0 0 0 var(--frame) var(--bg), inset 0 0 0 calc(var(--frame) + 2px) var(--gold), 0 0 24px rgba(232, 163, 61, 0.35); }
+  50% { box-shadow: inset 0 0 0 var(--frame) var(--bg), inset 0 0 0 calc(var(--frame) + 2px) var(--gold), 0 0 48px rgba(232, 163, 61, 0.7); }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }

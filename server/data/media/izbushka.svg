@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="30%" r="80%"><stop offset="0" stop-color="#5a2a18"/><stop offset="1" stop-color="#1a1210"/></radialGradient>
+  </defs>
+  <rect width="400" height="300" fill="url(#sky)"/>
+  <circle cx="320" cy="55" r="28" fill="#ece2cc"/>
+  <circle cx="332" cy="48" r="26" fill="#3a1712"/>
+  <g fill="#000">
+    <path d="M0 300V190l30-40 10 30 25-60 20 50 25-30 15 40 20-20v140z"/>
+    <path d="M400 300V200l-30-50-12 35-28-70-18 55-22-25-12 45z"/>
+  </g>
+  <g fill="#0d0907" stroke="#0d0907" stroke-linejoin="round">
+    <path d="M110 170l90-60 90 60z"/>
+    <rect x="125" y="170" width="150" height="70"/>
+    <path d="M200 110l-6-18h12z"/>
+    <path d="M160 215l-12 40-18 10 6 6 24-8 14-36z M240 215l12 40 18 10-6 6-24-8-14-36z" stroke-width="6"/>
+  </g>
+  <rect x="180" y="185" width="22" height="26" fill="#e0a43a"/>
+  <rect x="180" y="185" width="22" height="26" fill="none" stroke="#0d0907" stroke-width="3"/>
+  <path d="M191 185v26M180 198h22" stroke="#0d0907" stroke-width="2"/>
+  <circle cx="145" cy="150" r="3" fill="#e0a43a"/>
+  <path d="M0 270q100-15 200 0t200 0v30H0z" fill="#000"/>
+</svg>
