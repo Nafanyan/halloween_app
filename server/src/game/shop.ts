@@ -23,37 +23,38 @@ export function parseItem(input: unknown): ShopItemInput | null {
   return out;
 }
 
-const sold = (s: GameState, itemId: string) => s.shop.purchases.filter((p) => p.itemId === itemId).length;
+export type CatalogResult = { ok: true; items: ShopItem[] } | { ok: false; error: ErrorCode };
+const catOk = (items: ShopItem[]): CatalogResult => ({ ok: true, items });
 
-export function remaining(s: GameState, itemId: string): number {
-  const item = s.shop.items.find((i) => i.id === itemId);
-  return item ? item.quantity - sold(s, itemId) : 0;
+export function soldCount(s: GameState, itemId: string): number {
+  return s.shop.purchases.filter((p) => p.itemId === itemId).length;
 }
 
-export function addItem(s: GameState, input: unknown, id: string): Result {
+export function remaining(s: GameState, items: ShopItem[], itemId: string): number {
+  const item = items.find((i) => i.id === itemId);
+  return item ? item.quantity - soldCount(s, itemId) : 0;
+}
+
+export function addItem(items: ShopItem[], input: unknown, id: string): CatalogResult {
   const parsed = parseItem(input);
   if (!parsed) return err('INVALID_ITEM');
-  return ok({ ...s, shop: { ...s.shop, items: [...s.shop.items, { ...parsed, id }] } });
+  return catOk([...items, { ...parsed, id }]);
 }
 
-export function updateItem(s: GameState, id: string, input: unknown): Result {
-  if (!s.shop.items.some((i) => i.id === id)) return err('NOT_FOUND');
+export function updateItem(items: ShopItem[], id: string, input: unknown, sold: number): CatalogResult {
+  if (!items.some((i) => i.id === id)) return err('NOT_FOUND');
   const parsed = parseItem(input);
-  if (!parsed || parsed.quantity < sold(s, id)) return err('INVALID_ITEM');
-  const items: ShopItem[] = s.shop.items.map((i) => (i.id === id ? { ...parsed, id } : i));
-  return ok({ ...s, shop: { ...s.shop, items } });
+  if (!parsed || parsed.quantity < sold) return err('INVALID_ITEM');
+  return catOk(items.map((i) => (i.id === id ? { ...parsed, id } : i)));
 }
 
-export function deleteItem(s: GameState, id: string): Result {
-  if (!s.shop.items.some((i) => i.id === id)) return err('NOT_FOUND');
-  return ok({
-    ...s,
-    shop: {
-      ...s.shop,
-      items: s.shop.items.filter((i) => i.id !== id),
-      purchases: s.shop.purchases.filter((p) => p.itemId !== id),
-    },
-  });
+export function deleteItem(items: ShopItem[], id: string): CatalogResult {
+  if (!items.some((i) => i.id === id)) return err('NOT_FOUND');
+  return catOk(items.filter((i) => i.id !== id));
+}
+
+export function dropPurchasesOf(s: GameState, itemId: string): GameState {
+  return { ...s, shop: { ...s.shop, purchases: s.shop.purchases.filter((p) => p.itemId !== itemId) } };
 }
 
 export function setShopOpen(s: GameState, open: boolean): Result {
@@ -64,11 +65,11 @@ export function setShopOpen(s: GameState, open: boolean): Result {
   return ok({ ...s, shop: { ...s.shop, open } });
 }
 
-export function sellItem(s: GameState, itemId: string, playerId: string, purchaseId: string, now: number): Result {
-  const item = s.shop.items.find((i) => i.id === itemId);
+export function sellItem(s: GameState, items: ShopItem[], itemId: string, playerId: string, purchaseId: string, now: number): Result {
+  const item = items.find((i) => i.id === itemId);
   const player = s.players.find((p) => p.id === playerId);
   if (!item || !player) return err('NOT_FOUND');
-  if (remaining(s, itemId) <= 0) return err('SOLD_OUT');
+  if (remaining(s, items, itemId) <= 0) return err('SOLD_OUT');
   if (player.score < item.price) return err('NOT_ENOUGH_POINTS');
   return ok({
     ...s,

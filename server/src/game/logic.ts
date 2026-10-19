@@ -1,13 +1,13 @@
-import type { ErrorCode, GameState, Player, QuestionId, QuestionPack, Result } from '@quiz/shared';
+import type { ErrorCode, GameDef, GameState, Player, QuestionId, QuestionPack, Result } from '@quiz/shared';
 import { findQuestion } from '../questions';
 
 const MAX_NAME = 24;
 const err = (error: ErrorCode): { ok: false; error: ErrorCode } => ({ ok: false, error });
 const ok = (state: GameState): Result => ({ ok: true, state });
 
-export function initialState(): GameState {
+export function initialState(activeGameId: string): GameState {
   return { phase: 'lobby', players: [], playedCells: [], currentRound: 0, activeQuestion: null,
-    shop: { open: false, items: [], purchases: [] } };
+    shop: { open: false, purchases: [] }, activeGameId };
 }
 
 export function hasPlayer(s: GameState, id: string): boolean {
@@ -18,13 +18,14 @@ export function registerPlayer(
   s: GameState,
   name: string,
   id: string,
+  startScore = 0,
 ): { ok: true; state: GameState; player: Player } | { ok: false; error: ErrorCode } {
   const trimmed = String(name ?? '').trim();
   if (trimmed === '') return err('NAME_EMPTY');
   if ([...trimmed].length > MAX_NAME) return err('NAME_TOO_LONG');
   const key = trimmed.toLowerCase();
   if (s.players.some((p) => p.name.trim().toLowerCase() === key)) return err('NAME_TAKEN');
-  const player: Player = { id, name: trimmed, score: 0, online: true };
+  const player: Player = { id, name: trimmed, score: startScore, online: true };
   return { ok: true, state: { ...s, players: [...s.players, player] }, player };
 }
 
@@ -58,8 +59,9 @@ export function adjustScore(s: GameState, playerId: string, delta: number): Resu
   return ok(addScore(s, playerId, delta));
 }
 
-export function startGame(s: GameState): Result {
+export function startGame(s: GameState, pack: QuestionPack): Result {
   if (s.phase !== 'lobby') return err('WRONG_PHASE');
+  if (!pack.rounds.some((r) => r.themes.some((th) => th.questions.length > 0))) return err('NO_QUESTIONS');
   return ok({ ...s, phase: 'game' });
 }
 
@@ -102,11 +104,14 @@ export function judgeCorrect(s: GameState, pack: QuestionPack): Result {
   return ok(closeWith(s, a.answeringPlayerId, found.question.value));
 }
 
-export function judgeWrong(s: GameState): Result {
+export function judgeWrong(s: GameState, game: GameDef): Result {
   const a = s.activeQuestion;
   if (!a || a.answeringPlayerId === null) return err('NO_ANSWERER');
+  const found = findQuestion(game, a.id);
+  if (!found) return err('NOT_FOUND');
+  const scored = game.scoring.wrongPenalty ? addScore(s, a.answeringPlayerId, -found.question.value) : s;
   return ok({
-    ...s,
+    ...scored,
     activeQuestion: { ...a, answeringPlayerId: null, wrongPlayerIds: [...a.wrongPlayerIds, a.answeringPlayerId] },
   });
 }
@@ -123,13 +128,18 @@ export function closeQuestion(s: GameState): Result {
   return ok(closeWith(s, null, 0));
 }
 
-export function newGame(s: GameState, opts: { removePlayers: boolean }): GameState {
+export function newGame(s: GameState, opts: { removePlayers: boolean; startScore: number }): GameState {
   return {
     phase: 'lobby',
-    players: opts.removePlayers ? [] : s.players.map((p) => ({ ...p, score: 0 })),
+    players: opts.removePlayers ? [] : s.players.map((p) => ({ ...p, score: opts.startScore })),
     playedCells: [],
     currentRound: 0,
     activeQuestion: null,
-    shop: { open: false, items: s.shop.items, purchases: [] },
+    shop: { open: false, purchases: [] },
+    activeGameId: s.activeGameId,
   };
+}
+
+export function activateGame(s: GameState, id: string, startScore: number): GameState {
+  return { ...newGame(s, { removePlayers: false, startScore }), activeGameId: id };
 }
