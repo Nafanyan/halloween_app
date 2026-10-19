@@ -15,7 +15,13 @@ export function QuestionsPanel({ edit }: { edit: GameEditView }) {
   const disabled = edit.locked;
 
   // Новая версия с сервера заменяет локальную; открытая форма держит своё состояние сама.
-  useEffect(() => setRounds(edit.rounds), [edit.rounds]);
+  const local = useRef(rounds);
+  local.current = rounds;
+  useEffect(() => {
+    // Если сервер прислал не то, что у нас (правка с другой вкладки), форма уже привязана к чужому индексу — закрываем.
+    if (JSON.stringify(stripUrls(edit.rounds)) !== JSON.stringify(stripUrls(local.current))) setOpen(null);
+    setRounds(edit.rounds);
+  }, [edit.rounds]);
 
   const save = (next: EditRound[]) => {
     if (next === rounds) return;
