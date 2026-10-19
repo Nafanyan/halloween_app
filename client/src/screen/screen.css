@@ -42,3 +42,8 @@
 .question-text { font-size: 4.6vw; font-weight: 600; line-height: 1.2; max-width: 90vw; text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9); }
 .question-img { max-width: 80vw; max-height: 45vh; border: 4px solid var(--gold); border-radius: 16px; box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6); transform: rotate(-1deg); }
 .answering { --frame: 0.5vw; padding: calc(var(--frame) + 1.4vh) calc(var(--frame) + 3vw); font-family: var(--display); font-size: 4vw; color: var(--ember); animation: candle 2s ease-in-out infinite; }
+
+/* Custom game background: same veil as theme.css body::before, above the tapestry. */
+.screen-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.screen-layer { position: relative; z-index: 1; }
+.sound-unlock { position: fixed; right: 1.5vw; bottom: 1.5vh; z-index: 5; font-size: 1.6vw; padding: 0.5em 1em; cursor: pointer; color: var(--gold); background: rgba(18, 13, 11, 0.85); border: 1px solid rgba(201, 162, 74, 0.6); border-radius: 8px; font-family: inherit; }

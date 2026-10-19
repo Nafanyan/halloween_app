@@ -3,7 +3,7 @@ import type { PublicView } from '@quiz/shared';
 import { buttonState } from '../src/player/buttonState';
 
 const view = (aq: { answeringPlayerId: string | null; wrongPlayerIds: string[] } | null): PublicView => ({
-  phase: 'game', joinUrl: '', players: [], roundIndex: 0, roundNames: [], themes: [], shop: { open: false, items: [] },
+  phase: 'game', joinUrl: '', players: [], roundIndex: 0, roundNames: [], themes: [], shop: { open: false, items: [] }, game: { id: 'g-aaaaaaaa', title: 'T', subtitle: '' },
   activeQuestion: aq && { id: '0/0/0', themeName: 't', value: 100, text: 'q', ...aq },
 });
 

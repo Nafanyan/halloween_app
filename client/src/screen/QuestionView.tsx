@@ -29,8 +29,8 @@ export function QuestionView({ question, players }: { question: PublicQuestionVi
     <div className="question">
       <div className="question-head label">{question.themeName} · {question.value}</div>
       <div className="question-text">{question.text}</div>
-      {question.image && <img className="question-img" src={`/media/${question.image}`} alt="" />}
-      {question.audio && <audio ref={audioRef} src={`/media/${question.audio}`} />}
+      {question.image && <img className="question-img" src={question.image} alt="" />}
+      {question.audio && <audio ref={audioRef} src={question.audio} />}
       {answerer && <div className="answering tarot">Отвечает {answerer.name}</div>}
     </div>
   );

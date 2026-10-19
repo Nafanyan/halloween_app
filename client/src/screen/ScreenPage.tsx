@@ -6,12 +6,15 @@ import { Scoreboard } from './Scoreboard';
 import { QuestionView } from './QuestionView';
 import { Showcase } from '../shop/Showcase';
 import { PurchaseReveal } from '../shop/PurchaseReveal';
+import { useLobbyMusic } from './lobbyMusic';
+import { SoundUnlock } from './SoundUnlock';
 import './screen.css';
 
 export function ScreenPage() {
   const view = usePublicView();
   const [started, setStarted] = useState(false);
   const purchase = usePurchaseQueue();
+  const music = useLobbyMusic(view?.game.lobbyMusic, started && view?.phase === 'lobby');
 
   useEffect(() => {
     if (!started) return;
@@ -31,24 +34,39 @@ export function ScreenPage() {
     );
   }
   if (!view) return <div className="screen screen-start"><h1>Зовём духов…</h1></div>;
-  if (view.phase === 'lobby') return <div className="screen"><Lobby view={view} /></div>;
+  const bg = view.game.background;
+  const frame = (content: React.ReactNode) => (
+    <>
+      {bg && (
+        <div
+          className="screen-bg"
+          style={{
+            background: `linear-gradient(rgba(18, 13, 11, 0.94) 0%, rgba(18, 13, 11, 0.85) 28%, rgba(18, 13, 11, 0.62) 55%, rgba(18, 13, 11, 0.88) 100%), url("${bg}") center / cover no-repeat`,
+          }}
+        />
+      )}
+      {content}
+      {music.blocked && <SoundUnlock onClick={music.unlock} />}
+    </>
+  );
+  if (view.phase === 'lobby') return frame(<div className="screen screen-layer"><Lobby view={view} /></div>);
   const reveal = purchase.current && (
     <PurchaseReveal key={purchase.current.purchaseId} purchase={purchase.current} onDone={purchase.done} />
   );
   const q = view.activeQuestion;
-  return (
+  return frame(
     <>
       {q ? (
-        <div className="screen">
+        <div className="screen screen-layer">
           <QuestionView key={q.id} question={q} players={view.players} />
         </div>
       ) : (
-        <div className="screen screen-game">
+        <div className="screen screen-game screen-layer">
           {view.shop.open ? <Showcase items={view.shop.items} size="tv" /> : <Grid view={view} />}
           <Scoreboard players={view.players} />
         </div>
       )}
       {reveal}
-    </>
+    </>,
   );
 }

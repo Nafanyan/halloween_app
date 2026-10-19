@@ -5,8 +5,8 @@ import { Avatar } from '../avatar/Avatar';
 export function Lobby({ view }: { view: PublicView }) {
   return (
     <div className="lobby">
-      <h1>Сумеречный шабаш</h1>
-      <p className="script lobby-sub">Наведи телефон на знак — и входи в лес</p>
+      <h1>{view.game.title}</h1>
+      {view.game.subtitle && <p className="script lobby-sub">{view.game.subtitle}</p>}
       <div className="lobby-row">
         <div className="lobby-qr">
           <div className="qr-box tarot"><QRCodeSVG value={view.joinUrl} size={256} style={{ width: '40vh', height: '40vh' }} /></div>
