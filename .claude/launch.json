@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "quiz", "runtimeExecutable": "env", "runtimeArgs": ["ADMIN_PIN=1234", "npm", "start"], "port": 3000 }
+    { "name": "quiz", "runtimeExecutable": "env", "runtimeArgs": ["ADMIN_PIN=1234", "npm", "start"], "port": 3000 },
+    { "name": "quiz-win", "runtimeExecutable": "cmd", "runtimeArgs": ["/c", "set ADMIN_PIN=1234&& npm start"], "port": 3000 }
   ]
 }
