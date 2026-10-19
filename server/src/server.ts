@@ -151,10 +151,17 @@ export function createQuizServer(opts: QuizServerOptions) {
     for (const id of connections.keys()) io.to(playerRoom(id)).emit('player:trophies', trophiesOf(state, game, id));
   }
 
-  function commit(next: GameState): void {
+  /** Сохраняет и рассылает; при ошибке записи state.json состояние в памяти не меняется. */
+  function commit(next: GameState): boolean {
+    try {
+      saveState(opts.statePath, next);
+    } catch (e) {
+      console.warn(`[state] не удалось записать ${opts.statePath}: ${(e as Error).message}`);
+      return false;
+    }
     state = next;
-    saveState(opts.statePath, state);
     emitAll();
+    return true;
   }
 
   /** После правки игры в библиотеке: активная видна всем, остальные — только админам. */
@@ -163,10 +170,11 @@ export function createQuizServer(opts: QuizServerOptions) {
     else emitAdmins();
   }
 
-  function apply(result: Result, ack: AckFn): void {
-    if (!result.ok) return ack(result);
-    commit(result.state);
-    ack({ ok: true });
+  /** Возвращает true, если состояние применено и сохранено. */
+  function apply(result: Result, ack: AckFn): boolean {
+    const done = result.ok && commit(result.state);
+    ack(done ? { ok: true } : result.ok ? fail('SAVE_FAILED') : result);
+    return done;
   }
 
   /** Binds socket to player; returns state with online updated on 0→1. */
@@ -212,15 +220,18 @@ export function createQuizServer(opts: QuizServerOptions) {
     // Bind from handshake so events buffered offline (e.g. a buzz) count before player:resume arrives.
     const authId = obj(socket.handshake.auth).playerId;
     const bound = typeof authId === 'string' && logic.hasPlayer(state, authId) ? bind(socket, authId, state) : state;
-    if (bound !== state) commit(bound); // broadcast includes this socket
-    else socket.emit('state:public', toPublicView(state, active(), opts.joinUrl));
+    // A successful commit broadcasts to this socket too.
+    if (bound === state || !commit(bound)) socket.emit('state:public', toPublicView(state, active(), opts.joinUrl));
 
     socket.on('player:join', (p, ack) => {
       const reply = ackOf(ack);
       const name = String(obj(p).name ?? '');
       const reg = logic.registerPlayer(state, name, randomUUID(), active().def.scoring.startScore);
       if (!reg.ok) return reply(reg);
-      commit(bind(socket, reg.player.id, unbind(socket, reg.state)));
+      if (!commit(bind(socket, reg.player.id, unbind(socket, reg.state)))) {
+        unbind(socket, state);
+        return reply(fail('SAVE_FAILED'));
+      }
       reply({ ok: true, playerId: reg.player.id });
     });
 
@@ -247,9 +258,8 @@ export function createQuizServer(opts: QuizServerOptions) {
       if (!id || !me) return reply(fail('NOT_FOUND'));
       const image = obj(p).image;
       if (image === null) {
-        const result = setAvatar(state, id, undefined);
-        if (result.ok) deleteAvatarFile(me.avatar);
-        return apply(result, reply);
+        if (apply(setAvatar(state, id, undefined), reply)) deleteAvatarFile(me.avatar);
+        return;
       }
       const bytes = Buffer.isBuffer(image) || image instanceof Uint8Array ? image
         : image instanceof ArrayBuffer ? new Uint8Array(image) : null;
@@ -263,9 +273,8 @@ export function createQuizServer(opts: QuizServerOptions) {
         deleteAvatarFile(`/media/avatars/${name}`);
         return reply(fail('INVALID_IMAGE'));
       }
-      const result = setAvatar(state, id, `/media/avatars/${name}`);
-      deleteAvatarFile(result.ok ? me.avatar : `/media/avatars/${name}`);
-      apply(result, reply);
+      const done = apply(setAvatar(state, id, `/media/avatars/${name}`), reply);
+      deleteAvatarFile(done ? me.avatar : `/media/avatars/${name}`);
     });
 
     socket.on('screen:hello', () => {
@@ -281,12 +290,19 @@ export function createQuizServer(opts: QuizServerOptions) {
       sendAdmin(socket);
     });
 
-    /** Registers an admin-only handler; `run` gets the first argument as payload. */
-    const onAdmin = (event: keyof ClientToServerEvents, run: (p: Record<string, unknown>) => Result) => {
+    /**
+     * Registers an admin-only handler; `run` gets the first argument as payload.
+     * Side effects passed to `after` run only once the new state is saved.
+     */
+    const onAdmin = (
+      event: keyof ClientToServerEvents,
+      run: (p: Record<string, unknown>, after: (fn: () => void) => void) => Result,
+    ) => {
       (socket.on as (e: string, h: (...a: unknown[]) => void) => void)(event, (...args) => {
         const reply = ackOf(args[args.length - 1]);
         if (!socket.data.isAdmin) return reply(fail('UNAUTHORIZED'));
-        apply(run(obj(args[0])), reply);
+        const effects: (() => void)[] = [];
+        if (apply(run(obj(args[0]), (fn) => effects.push(fn)), reply)) effects.forEach((fn) => fn());
       });
     };
 
@@ -301,30 +317,33 @@ export function createQuizServer(opts: QuizServerOptions) {
     onAdmin('admin:partial', (p) => logic.judgePartial(state, p.points as number));
     onAdmin('admin:close', () => logic.closeQuestion(state));
     onAdmin('admin:adjustScore', (p) => logic.adjustScore(state, p.playerId as string, p.delta as number));
-    onAdmin('admin:removePlayer', (p) => {
+    onAdmin('admin:removePlayer', (p, after) => {
       const avatars = avatarsOf([p.playerId as string]);
-      const result = logic.removePlayer(state, p.playerId as string);
-      if (result.ok) {
+      after(() => {
         evict([p.playerId as string]);
         avatars.forEach(deleteAvatarFile);
-      }
-      return result;
+      });
+      return logic.removePlayer(state, p.playerId as string);
     });
-    onAdmin('admin:newGame', (p) => {
+    onAdmin('admin:newGame', (p, after) => {
       const removing = p.removePlayers === true;
-      const avatars = removing ? avatarsOf(state.players.map((pl) => pl.id)) : [];
-      if (removing) evict(state.players.map((pl) => pl.id));
-      avatars.forEach(deleteAvatarFile);
+      if (removing) {
+        const ids = state.players.map((pl) => pl.id);
+        const avatars = avatarsOf(ids);
+        after(() => {
+          evict(ids);
+          avatars.forEach(deleteAvatarFile);
+        });
+      }
       const startScore = active().def.scoring.startScore;
       return { ok: true, state: logic.newGame(state, { removePlayers: removing, startScore }) };
     });
-    onAdmin('admin:clearAvatar', (p) => {
+    onAdmin('admin:clearAvatar', (p, after) => {
       const id = str(p.playerId);
       if (id === null) return fail('NOT_FOUND');
       const avatar = state.players.find((pl) => pl.id === id)?.avatar;
-      const result = setAvatar(state, id, undefined);
-      if (result.ok) deleteAvatarFile(avatar);
-      return result;
+      after(() => deleteAvatarFile(avatar));
+      return setAvatar(state, id, undefined);
     });
 
     onAdmin('admin:shopOpen', (p) => shop.setShopOpen(state, p.open === true));

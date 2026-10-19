@@ -518,6 +518,56 @@ describe('game library', () => {
     expect(v.editing!.shop).toEqual([]);
   });
 
+  describe('state.json write failure → SAVE_FAILED, nothing changes, server keeps answering', () => {
+    const breakState = () => {
+      fs.rmSync(statePath, { force: true });
+      fs.mkdirSync(statePath);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      return () => {
+        expect(warn).toHaveBeenCalled();
+        fs.rmSync(statePath, { recursive: true });
+        warn.mockRestore();
+      };
+    };
+
+    it('game:activate and progress events', async () => {
+      const url = await start();
+      const { c, id } = await player(url, 'Игрок');
+      const { a, view } = await adminView(url);
+      const { id: gid } = await call(a, 'game:create', { title: 'Другая' });
+      const repair = breakState();
+      expect(await call(a, 'game:activate', { id: gid })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+      expect(await call(a, 'admin:adjustScore', { playerId: id, delta: 5 })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+      expect(await call(c, 'player:join', { name: 'Второй' })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+      repair();
+      const fresh = await connect(url);
+      expect(views.get(fresh)).toMatchObject({
+        game: { id: view.game.id }, players: [{ id, name: 'Игрок', score: 0 }],
+      });
+      expect(await call(a, 'admin:audio', { action: 'play' })).toEqual({ ok: true });
+    });
+
+    it('admin:itemDelete in the active game keeps game.json and purchases together', async () => {
+      const url = await start();
+      const buyer = await player(url, 'Покупатель');
+      const { a, view } = await adminView(url);
+      const gid = view.game.id;
+      await call(a, 'admin:startGame');
+      await call(a, 'admin:adjustScore', { playerId: buyer.id, delta: 500 });
+      const added = nextEvent(a, 'state:admin', (v: AdminView) => v.shop.items.length === 1);
+      await call(a, 'admin:itemAdd', { gameId: gid, item: { name: 'Метла', description: '', price: 100, quantity: 2, hidden: false } });
+      const itemId = (await added).shop.items[0].id;
+      expect(await call(a, 'admin:sell', { itemId, playerId: buyer.id })).toEqual({ ok: true });
+      const repair = breakState();
+      expect(await call(a, 'admin:itemDelete', { gameId: gid, id: itemId })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+      repair();
+      expect(readGame(gid).shop.map((i: { id: string }) => i.id)).toEqual([itemId]);
+      const { view: after } = await adminView(url);
+      expect(after.shop.items.map((i) => i.id)).toEqual([itemId]);
+      expect(after.shop.purchases).toHaveLength(1);
+    });
+  });
+
   it('duplicate keeps item ids; deleting the item in the copy keeps active purchases', async () => {
     const url = await start();
     const buyer = await player(url, 'Покупатель');

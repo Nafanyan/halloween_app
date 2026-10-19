@@ -30,8 +30,8 @@ export function findGame(lib: GameLibrary, id: unknown): ActiveGame | ErrorCode 
 export interface GameContext {
   lib: GameLibrary;
   state(): GameState;
-  /** Сохраняет и рассылает новое состояние прогресса. */
-  commit(next: GameState): void;
+  /** Сохраняет и рассылает новое состояние прогресса; false — state.json не записан, ничего не изменилось. */
+  commit(next: GameState): boolean;
   /** Рассылка после изменения игры в библиотеке (без изменения прогресса). */
   changed(gameId: string): void;
   /** state:admin только этому сокету. */
@@ -70,9 +70,16 @@ export function registerGameHandlers(socket: QuizSocket, ctx: GameContext): void
       i.image !== undefined && !fs.existsSync(path.join(lib.mediaDir(game.id), i.image)));
     if (missing) return fail('INVALID_ITEM');
     const def: GameDef = { ...game.def, shop: result.items };
-    if (saved(() => lib.save(game.id, def)) === null) return fail('SAVE_FAILED');
-    if (after && isActive(game.id)) ctx.commit(after(ctx.state()));
-    else ctx.changed(game.id);
+    if (saved(() => { lib.save(game.id, def); return true; }) === null) return fail('SAVE_FAILED');
+    if (after && isActive(game.id)) {
+      if (!ctx.commit(after(ctx.state()))) {
+        // state.json не записан — возвращаем прежний каталог, чтобы game.json и state.json не разошлись.
+        saved(() => { lib.save(game.id, game.def); return true; });
+        return fail('SAVE_FAILED');
+      }
+    } else {
+      ctx.changed(game.id);
+    }
     return { ok: true };
   };
 
@@ -106,7 +113,7 @@ export function registerGameHandlers(socket: QuizSocket, ctx: GameContext): void
   on('game:activate', (p) => {
     const game = findGame(lib, p.id);
     if (typeof game === 'string') return fail(game);
-    ctx.commit(logic.activateGame(ctx.state(), game.id, game.def.scoring.startScore));
+    if (!ctx.commit(logic.activateGame(ctx.state(), game.id, game.def.scoring.startScore))) return fail('SAVE_FAILED');
     return { ok: true };
   });
 
