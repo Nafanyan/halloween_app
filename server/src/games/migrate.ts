@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ShopItem } from '@quiz/shared';
-import { parseItem } from '../game/shop';
+import { IMAGE_RE, parseItem } from '../game/shop';
 import { loadQuestions } from '../questions';
 import { emptyGame, type GameLibrary } from './store';
 
@@ -60,7 +60,7 @@ export function migrate(opts: { dataDir: string; statePath: string; lib: GameLib
       let file: string | undefined;
       if (typeof image === 'string') {
         const name = image.startsWith('/media/shop/') ? image.slice('/media/shop/'.length) : image;
-        if (!name.includes('/') && copyMedia(path.join(mediaSrc, 'shop'), mediaDst, name)) file = name;
+        if (IMAGE_RE.test(name) && copyMedia(path.join(mediaSrc, 'shop'), mediaDst, name)) file = name;
       }
       const parsed = parseItem(file ? { ...rest, image: file } : rest);
       if (parsed) shop.push({ ...parsed, id: raw.id });

@@ -3,7 +3,7 @@ import type { ErrorCode, GameState, Result, ShopItem, ShopItemInput } from '@qui
 const err = (error: ErrorCode): { ok: false; error: ErrorCode } => ({ ok: false, error });
 const ok = (state: GameState): Result => ({ ok: true, state });
 
-const IMAGE_RE = /^[a-z0-9-]+\.(jpg|png|webp|svg)$/;
+export const IMAGE_RE = /^[a-z0-9-]+\.(jpg|png|webp|svg)$/;
 const isInt = (v: unknown, min: number, max: number): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 

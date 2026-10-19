@@ -105,4 +105,22 @@ describe('migrate', () => {
     expect(id).toBeTruthy();
     expect(fs.readFileSync(statePath, 'utf8')).toBe('{broken');
   });
+
+  it('небезопасные и неподходящие имена картинок не копируются, предмет мигрирует без image', () => {
+    fs.writeFileSync(path.join(dataDir, 'media', 'shop', 'ABC.JPG'), 'x');
+    const st = JSON.parse(JSON.stringify(STATE));
+    const base = { description: '', price: 10, quantity: 1, hidden: false };
+    st.shop.items = [
+      { ...base, id: 'a', name: 'A', image: '/media/shop/../../state.json' },
+      { ...base, id: 'b', name: 'B', image: '..\..\state.json' },
+      { ...base, id: 'c', name: 'C', image: '/media/shop/ABC.JPG' },
+      { ...base, id: 'd', name: 'D', image: '..' },
+    ];
+    fs.writeFileSync(statePath, JSON.stringify(st));
+    const id = migrate({ dataDir, statePath, lib });
+    const shop = lib.def(id)!.shop;
+    expect(shop.map((i) => i.id)).toEqual(['a', 'b', 'c', 'd']);
+    for (const i of shop) expect(i.image).toBeUndefined();
+    expect(fs.readdirSync(lib.mediaDir(id))).toEqual(['izba.svg']);
+  });
 });
