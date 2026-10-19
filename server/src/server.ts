@@ -35,9 +35,8 @@ const MEDIA_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'
 /** Библиотека игр и стартовое состояние: миграция, выбор активной игры, уборка медиа. */
 function openLibrary(opts: QuizServerOptions): { lib: GameLibrary; state: GameState } {
   const gamesDir = path.join(opts.dataDir, 'games');
-  const fresh = !fs.existsSync(gamesDir);
+  if (!fs.existsSync(gamesDir)) migrate({ dataDir: opts.dataDir, statePath: opts.statePath });
   const lib = new GameLibrary(gamesDir);
-  if (fresh) migrate({ dataDir: opts.dataDir, statePath: opts.statePath, lib });
 
   const saved = readActiveGameId(opts.statePath);
   const usable = (id: string | null): id is string => id !== null && GAME_ID_RE.test(id) && lib.def(id) !== null;
@@ -46,6 +45,13 @@ function openLibrary(opts: QuizServerOptions): { lib: GameLibrary; state: GameSt
   const def = lib.def(id)!;
   let state = loadState(opts.statePath, def) ?? logic.initialState(id);
   if (state.activeGameId !== id) {
+    if (fs.existsSync(opts.statePath)) {
+      const entry = saved === null ? undefined : lib.get(saved);
+      const reason = saved === null ? 'активная игра не указана'
+        : entry && 'error' in entry ? `игра ${saved} повреждена (${entry.error})` : `игра ${saved} не найдена`;
+      fs.copyFileSync(opts.statePath, opts.statePath + '.bak');
+      console.warn(`[games] ${reason}; активна ${id}, прогресс сброшен, прежнее состояние сохранено как ${opts.statePath}.bak`);
+    }
     state = logic.activateGame(state, id, def.scoring.startScore);
     saveState(opts.statePath, state);
   }

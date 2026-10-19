@@ -8,7 +8,10 @@ export function CatalogPanel({ edit }: { edit: GameEditView }) {
   const editing = edit.shop.find((i) => i.id === editingId);
 
   const remove = (item: AdminShopItem) => {
-    if (confirm(`Удалить «${item.name}»?`)) call('admin:itemDelete', { gameId: edit.id, id: item.id });
+    const text = edit.active && item.remaining < item.quantity
+      ? 'Предмет уже покупали, очки не вернутся. Удалить?'
+      : `Удалить «${item.name}»?`;
+    if (confirm(text)) call('admin:itemDelete', { gameId: edit.id, id: item.id });
   };
 
   return (

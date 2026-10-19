@@ -387,6 +387,29 @@ describe('game library', () => {
     expect(view.shop.purchases).toMatchObject([{ id: 'u1', itemName: 'Метла', playerName: 'Аня' }]);
   });
 
+  it('failed migration leaves no games/; next start migrates with players, scores and purchases', async () => {
+    const legacy = {
+      phase: 'game', players: [{ id: 'p1', name: 'Аня', score: 300, online: false }],
+      playedCells: [], currentRound: 0, activeQuestion: null,
+      shop: {
+        open: false,
+        items: [{ id: 'i1', name: 'Метла', description: '', price: 100, quantity: 2, hidden: false }],
+        purchases: [{ id: 'u1', itemId: 'i1', playerId: 'p1', price: 100, at: 1 }],
+      },
+    };
+    fs.writeFileSync(statePath, JSON.stringify(legacy));
+    vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => { throw new Error('диск отвалился'); });
+    await expect(start()).rejects.toThrow(/Миграция в библиотеку игр не удалась/);
+    vi.restoreAllMocks();
+    expect(fs.existsSync(path.join(dir, 'games'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toEqual(legacy);
+
+    const { view } = await adminView(await start());
+    expect(view.players).toEqual([{ id: 'p1', name: 'Аня', score: 300, online: false }]);
+    expect(view.shop.purchases).toMatchObject([{ id: 'u1', itemName: 'Метла', playerName: 'Аня' }]);
+    expect(JSON.parse(fs.readFileSync(statePath + '.pre-games', 'utf8'))).toEqual(legacy);
+  });
+
   it('game:create', async () => {
     const url = await start();
     const c = await connect(url);
@@ -636,10 +659,17 @@ describe('game library', () => {
     const broken = view.game.id;
     const { id: spare } = await call(a, 'game:create', { title: 'Запасная' });
     expect(await call(a, 'game:activate', { id: broken })).toEqual({ ok: true }); // writes state.json
+    await player(url, 'Аня');
     fs.writeFileSync(gameJson(broken), '{');
 
     await stop();
+    const before = fs.readFileSync(statePath, 'utf8');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { a: a2, view: v2 } = await adminView(await start());
+    expect(fs.readFileSync(statePath + '.bak', 'utf8')).toBe(before);
+    expect(JSON.parse(before).players.map((p: { name: string }) => p.name)).toEqual(['Аня']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`игра ${broken} повреждена`));
+    warn.mockRestore();
     expect(v2.game.id).toBe(spare);
     expect(v2.games.find((g) => g.id === broken)).toMatchObject({ active: false, error: expect.any(String) });
     expect(await call(a2, 'game:activate', { id: broken })).toEqual({ ok: false, error: 'GAME_BROKEN' });

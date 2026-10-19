@@ -3,10 +3,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const VOLUME = 0.4;
 const FADE_MS = 1500;
 
+/** Rejected play(): show the unlock button only if music should be playing and it wasn't just interrupted (AbortError). */
+export function blocksPlayback(err: unknown, playing: boolean): boolean {
+  return playing && (err as { name?: unknown } | null)?.name !== 'AbortError';
+}
+
 /** Looping lobby music: quiet, fades out over 1.5 s when `playing` turns false. */
 export function useLobbyMusic(url: string | undefined, playing: boolean): { blocked: boolean; unlock: () => void } {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fadeRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   const [blocked, setBlocked] = useState(false);
 
   const stopFade = () => {
@@ -20,7 +27,9 @@ export function useLobbyMusic(url: string | undefined, playing: boolean): { bloc
     const audio = audioRef.current;
     if (!audio) return;
     audio.volume = VOLUME;
-    audio.play().then(() => setBlocked(false), () => setBlocked(true));
+    audio.play().then(() => setBlocked(false), (err) => {
+      if (blocksPlayback(err, playingRef.current)) setBlocked(true);
+    });
   }, []);
 
   // Restart on url change.
@@ -47,6 +56,7 @@ export function useLobbyMusic(url: string | undefined, playing: boolean): { bloc
 
   // Start / fade out on phase change.
   useEffect(() => {
+    if (!playing) setBlocked(false);
     const audio = audioRef.current;
     if (!audio || !url) return;
     if (playing) {
@@ -55,7 +65,6 @@ export function useLobbyMusic(url: string | undefined, playing: boolean): { bloc
       else audio.volume = VOLUME;
       return;
     }
-    setBlocked(false);
     if (audio.paused) return;
     stopFade();
     const startedAt = Date.now();
@@ -76,5 +85,9 @@ export function useLobbyMusic(url: string | undefined, playing: boolean): { bloc
     audioRef.current?.pause();
   }, []);
 
-  return { blocked, unlock: tryPlay };
+  const unlock = useCallback(() => {
+    if (playingRef.current) tryPlay();
+  }, [tryPlay]);
+
+  return { blocked, unlock };
 }

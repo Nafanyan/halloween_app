@@ -1,5 +1,6 @@
 import type { AdminView, GameSummary } from '@quiz/shared';
 import { call } from './adminApi';
+import { plural } from './plural';
 
 function GameCard({ game }: { game: GameSummary }) {
   const remove = () => {
@@ -12,7 +13,7 @@ function GameCard({ game }: { game: GameSummary }) {
     <li className="card game-card">
       <h3>{game.title}{game.active && <span className="game-badge">Активна</span>}</h3>
       {game.description && <p className="muted">{game.description}</p>}
-      <p className="muted">{game.rounds} раундов · {game.questions} вопросов</p>
+      <p className="muted">{game.rounds} {plural(game.rounds, ['раунд', 'раунда', 'раундов'])} · {game.questions} {plural(game.questions, ['вопрос', 'вопроса', 'вопросов'])}</p>
       {game.error && <p className="admin-error">{game.error}</p>}
       <div className="admin-row">
         <button className="btn" onClick={() => call('game:open', { id: game.id })}>Открыть</button>
