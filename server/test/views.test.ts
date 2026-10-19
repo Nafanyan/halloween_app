@@ -35,6 +35,14 @@ const game = (over: Partial<GameState> = {}): GameState => ({
 });
 
 describe('toPublicView', () => {
+  it('skips themes without questions but keeps original theme index in cell ids', () => {
+    const p = pack();
+    p.def.rounds[0].themes = [{ name: 'A', questions: [] }, theme('B')];
+    const v = toPublicView(game(), p, JOIN);
+    expect(v.themes.map((x) => x.name)).toEqual(['B']);
+    expect(v.themes[0].cells.map((c) => c.id)).toEqual(['0/1/0', '0/1/1']);
+  });
+
   it('never contains the answer of the active question', () => {
     const s = game({ activeQuestion: { id: '0/1/1', answeringPlayerId: null, wrongPlayerIds: [] } });
     const v = toPublicView(s, pack(), JOIN);
@@ -255,10 +263,24 @@ describe('shop projections', () => {
       expect(v.shop[1].imageUrl).toBe(mug);
       expect(v.media).toEqual({ lobbyMusic: `/games/${GID}/media/music.mp3`, background: `/games/${GID}/media/bg.jpg` });
       expect(v.settings.lobbyMusic).toBe('music.mp3');
-      expect(v.rounds).toEqual([
-        { name: 'Первый', themes: 2, questions: 4 },
-        { name: 'Второй', themes: 1, questions: 2 },
-      ]);
+      expect(v.rounds.map((r) => [r.name, r.themes.length])).toEqual([['Первый', 2], ['Второй', 1]]);
+    });
+
+    it('rounds carry full questions with media URLs', () => {
+      const a = g();
+      a.def.rounds[0].themes[0].questions[0] = { value: 100, text: 't', answer: 'a', image: 'a.jpg', audio: 'b.mp3' };
+      const q = editView(shopGame(), a, 'other').rounds[0].themes[0].questions;
+      expect(q[0]).toEqual({
+        value: 100, text: 't', answer: 'a', image: 'a.jpg', audio: 'b.mp3',
+        imageUrl: '/games/g-aaaaaaaa/media/a.jpg', audioUrl: '/games/g-aaaaaaaa/media/b.mp3',
+      });
+      expect(q[1]).toEqual({ value: 200, text: 'q200', answer: SECRET });
+    });
+
+    it('locked only for the active game in phase game', () => {
+      expect(editView(shopGame(), g(), GID).locked).toBe(true);
+      expect(editView(shopGame(), g(), 'other').locked).toBe(false);
+      expect(editView({ ...shopGame(), phase: 'lobby' }, g(), GID).locked).toBe(false);
     });
 
     it('active game: remaining accounts for purchases', () => {

@@ -3,6 +3,7 @@ import type {
   AdminShopItem,
   AdminView,
   CellView,
+  EditRound,
   GameEditView,
   GameState,
   GameSummary,
@@ -100,11 +101,18 @@ export function editView(s: GameState, game: ActiveGame, activeId: string): Game
       ...(background !== undefined && { background: mediaUrl(id, background) }),
     },
     shop: def.shop.map((i) => adminItem(id, i, active ? left(s, game, i.id) : i.quantity)),
-    rounds: def.rounds.map((r) => ({
+    rounds: def.rounds.map((r): EditRound => ({
       name: r.name,
-      themes: r.themes.length,
-      questions: r.themes.reduce((n, t) => n + t.questions.length, 0),
+      themes: r.themes.map((t) => ({
+        name: t.name,
+        questions: t.questions.map((q) => ({
+          ...q,
+          ...(q.image !== undefined && { imageUrl: mediaUrl(id, q.image) }),
+          ...(q.audio !== undefined && { audioUrl: mediaUrl(id, q.audio) }),
+        })),
+      })),
     })),
+    locked: active && s.phase === 'game',
   };
 }
 
@@ -113,13 +121,16 @@ export function toPublicView(s: GameState, game: ActiveGame, joinUrl: string): P
   const round = pack.rounds[s.currentRound];
   const played = new Set(s.playedCells);
 
-  const themes = (round?.themes ?? []).map((theme, t) => ({
-    name: theme.name,
-    cells: theme.questions.map((q, i): CellView => {
-      const id = questionId(s.currentRound, t, i);
-      return { id, value: q.value, played: played.has(id) };
-    }),
-  }));
+  // Пустые темы не показываем, но id клеток считаем по исходному индексу темы.
+  const themes = (round?.themes ?? [])
+    .map((theme, t) => ({
+      name: theme.name,
+      cells: theme.questions.map((q, i): CellView => {
+        const id = questionId(s.currentRound, t, i);
+        return { id, value: q.value, played: played.has(id) };
+      }),
+    }))
+    .filter((theme) => theme.cells.length > 0);
 
   let activeQuestion: PublicQuestionView | null = null;
   if (s.activeQuestion) {

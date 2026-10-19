@@ -3,12 +3,13 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import type {
-  ActiveGame, ClientToServerEvents, ErrorCode, GameDef, GameState, ServerToClientEvents, ShopItem,
+  ActiveGame, ClientToServerEvents, ErrorCode, GameDef, GameState, Round, ServerToClientEvents, ShopItem,
 } from '@quiz/shared';
 import * as logic from '../game/logic';
 import * as shop from '../game/shop';
 import type { GameLibrary } from './store';
-import { GAME_ID_RE, parseSettings } from './validate';
+import { QuestionsError } from '../questions';
+import { GAME_ID_RE, parseRounds, parseSettings } from './validate';
 
 export interface SocketData { isAdmin?: boolean; playerId?: string; editingId?: string }
 export type QuizSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
@@ -138,6 +139,25 @@ export function registerGameHandlers(socket: QuizSocket, ctx: GameContext): void
     // Отсутствующий ключ медиа означает «убрать».
     if (settings.lobbyMusic === undefined) delete def.lobbyMusic;
     if (settings.background === undefined) delete def.background;
+    if (saved(() => { lib.save(game.id, def); return true; }) === null) return fail('SAVE_FAILED');
+    ctx.changed(game.id);
+    return { ok: true };
+  });
+
+  on('game:updateRounds', (p) => {
+    const game = findGame(lib, p.id);
+    if (typeof game === 'string') return fail(game);
+    // Во время игры правка вопросов активной игры запрещена: прогресс ссылается на индексы.
+    if (ctx.state().phase === 'game' && isActive(game.id)) return fail('GAME_LOCKED');
+    let rounds: Round[];
+    try {
+      rounds = parseRounds(p.rounds, lib.mediaDir(game.id));
+    } catch (e) {
+      if (!(e instanceof QuestionsError)) throw e;
+      console.warn(`[games] вопросы отклонены: ${e.message}`);
+      return fail('INVALID_QUESTIONS');
+    }
+    const def: GameDef = { ...game.def, rounds };
     if (saved(() => { lib.save(game.id, def); return true; }) === null) return fail('SAVE_FAILED');
     ctx.changed(game.id);
     return { ok: true };

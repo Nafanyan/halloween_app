@@ -521,6 +521,71 @@ describe('game library', () => {
     expect('background' in readGame(id)).toBe(false);
   });
 
+  describe('game:updateRounds', () => {
+    const newRounds = [{ name: 'Новый', themes: [{ name: 'Новая тема', questions: [{ value: 100, text: 'В', answer: 'О' }] }] }];
+
+    it('requires admin; unknown id → NOT_FOUND', async () => {
+      const url = await start();
+      const c = await connect(url);
+      const { a, view } = await adminView(url);
+      expect(await call(c, 'game:updateRounds', { id: view.game.id, rounds: newRounds })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
+      expect(await call(a, 'game:updateRounds', { id: 'g-zzzzzzzz', rounds: newRounds })).toEqual({ ok: false, error: 'NOT_FOUND' });
+    });
+
+    it('active game in phase game → GAME_LOCKED, file untouched; lobby → saved and public', async () => {
+      const url = await start();
+      const c = await connect(url);
+      const { a, view } = await adminView(url);
+      const id = view.game.id;
+      await call(a, 'admin:startGame');
+      const before = fs.readFileSync(gameJson(id), 'utf8');
+      expect(await call(a, 'game:updateRounds', { id, rounds: newRounds })).toEqual({ ok: false, error: 'GAME_LOCKED' });
+      expect(fs.readFileSync(gameJson(id), 'utf8')).toBe(before);
+
+      expect(await call(a, 'admin:newGame', { removePlayers: false })).toEqual({ ok: true });
+      const pub = nextEvent(c, 'state:public', (v: PublicView) => v.themes.some((t) => t.name === 'Новая тема'));
+      expect(await call(a, 'game:updateRounds', { id, rounds: newRounds })).toEqual({ ok: true });
+      await pub;
+      expect(readGame(id).rounds).toEqual(newRounds);
+    });
+
+    it('inactive game in phase game is editable; persisted across restart', async () => {
+      const url = await start();
+      const { a } = await adminView(url);
+      await call(a, 'admin:startGame');
+      const { id } = await call(a, 'game:create', { title: 'Вторая' });
+      expect(await call(a, 'game:updateRounds', { id, rounds: newRounds })).toEqual({ ok: true });
+      await stop();
+      const url2 = await start();
+      const { a: b } = await adminView(url2);
+      const opened = nextEvent(b, 'state:admin', (v: AdminView) => v.editing?.id === id);
+      await call(b, 'game:open', { id });
+      expect((await opened).editing!.rounds).toEqual(newRounds);
+    });
+
+    it('invalid rounds → INVALID_QUESTIONS and a warning', async () => {
+      const url = await start();
+      const { a, view } = await adminView(url);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const bad = [{ name: 'Р', themes: [{ name: 'Т', questions: [{ value: 100, text: 'В', answer: '' }] }] }];
+      expect(await call(a, 'game:updateRounds', { id: view.game.id, rounds: bad })).toEqual({ ok: false, error: 'INVALID_QUESTIONS' });
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+      expect(readGame(view.game.id).rounds[0].name).toBe('Раунд 1');
+    });
+
+    it('disk write failure → SAVE_FAILED', async () => {
+      const url = await start();
+      const { a } = await adminView(url);
+      const { id } = await call(a, 'game:create', { title: 'Хрупкая' });
+      fs.rmSync(gameJson(id));
+      fs.mkdirSync(gameJson(id));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      expect(await call(a, 'game:updateRounds', { id, rounds: newRounds })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+      warn.mockRestore();
+    });
+  });
+
   it('disk write failure → SAVE_FAILED, game unchanged', async () => {
     const url = await start();
     const { a } = await adminView(url);

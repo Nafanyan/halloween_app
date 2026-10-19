@@ -1,5 +1,5 @@
 import type {
-  Ack, AdminView, AudioAction, ErrorCode, GameSettings, PublicView, PurchasedEvent, QuestionId, ShopItemInput, Trophy,
+  Ack, AdminView, AudioAction, ErrorCode, GameSettings, PublicView, PurchasedEvent, QuestionId, Round, ShopItemInput, Trophy,
 } from './types';
 
 export type IdAck = (r: { ok: true; id: string } | { ok: false; error: ErrorCode }) => void;
@@ -35,6 +35,7 @@ export interface ClientToServerEvents {
   'game:activate': (p: { id: string }, ack: Ack) => void;
   'game:open': (p: { id: string | null }, ack: Ack) => void;
   'game:updateSettings': (p: { id: string; settings: GameSettings }, ack: Ack) => void;
+  'game:updateRounds': (p: { id: string; rounds: Round[] }, ack: Ack) => void;
 }
 export interface ServerToClientEvents {
   'state:public': (v: PublicView) => void;
