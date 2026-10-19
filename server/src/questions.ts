@@ -24,13 +24,14 @@ function list(v: unknown, p: string): unknown[] {
   return v as unknown[];
 }
 
-function media(o: Obj, key: 'image' | 'audio', p: string, mediaDir: string): string | undefined {
+export function media(o: Obj, key: string, p: string, mediaDir: string): string | undefined {
+  const at = p ? `${p}.${key}` : key;
   if (o[key] === undefined) return undefined;
   const name = o[key];
-  if (typeof name !== 'string' || name === '') return fail(`${p}.${key}`, 'ожидается имя файла (строка)');
+  if (typeof name !== 'string' || name === '') return fail(at, 'ожидается имя файла (строка)');
   const file = path.resolve(mediaDir, name);
   if (path.dirname(file) !== path.resolve(mediaDir) || !fs.existsSync(file))
-    fail(`${p}.${key}`, `файл не найден в папке медиа: ${name}`);
+    fail(at, `файл не найден в папке медиа: ${name}`);
   return name;
 }
 
@@ -55,7 +56,7 @@ function theme(v: unknown, p: string, mediaDir: string): Theme {
   };
 }
 
-function round(v: unknown, p: string, mediaDir: string): Round {
+export function round(v: unknown, p: string, mediaDir: string): Round {
   if (!isObj(v)) return fail(p, 'ожидается объект');
   const o = v as Obj;
   return {

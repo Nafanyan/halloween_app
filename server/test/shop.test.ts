@@ -27,9 +27,9 @@ describe('parseItem', () => {
     expect(S.parseItem({ ...item, name: '  Зеркало ' })?.name).toBe('Зеркало');
     for (const bad of [{ ...item, name: '  ' }, { ...item, name: 'x'.repeat(61) }, { ...item, description: 'x'.repeat(501) },
       { ...item, price: -1 }, { ...item, price: 100001 }, { ...item, price: 1.5 }, { ...item, quantity: 0 },
-      { ...item, quantity: 100 }, { ...item, hidden: 'yes' }, { ...item, image: '/media/../state.json' }, null])
+      { ...item, quantity: 100 }, { ...item, hidden: 'yes' }, { ...item, image: '/media/../state.json' }, { ...item, image: '/media/shop/ab-12.jpg' }, null])
       expect(S.parseItem(bad)).toBeNull();
-    expect(S.parseItem({ ...item, image: '/media/shop/ab-12.jpg' })?.image).toBe('/media/shop/ab-12.jpg');
+    expect(S.parseItem({ ...item, image: 'ab-12.jpg' })?.image).toBe('ab-12.jpg');
   });
   it('returns only known fields, no image key when absent', () => {
     const p = S.parseItem({ ...item, extra: 1, image: undefined })!;
