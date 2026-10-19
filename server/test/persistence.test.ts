@@ -2,15 +2,19 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { GameState, QuestionPack } from '@quiz/shared';
-import { saveState, loadState } from '../src/persistence';
+import type { GameDef, GameState } from '@quiz/shared';
+import { saveState, loadState, readActiveGameId } from '../src/persistence';
 import { initialState } from '../src/game/logic';
 
-const pack: QuestionPack = {
+const shopItem = { id: 'i1', name: 'Приз', description: 'д', price: 10, quantity: 2, hidden: false };
+const pack: GameDef = {
+  version: 1, title: 'T', subtitle: '', description: '',
+  scoring: { wrongPenalty: false, startScore: 0 },
   rounds: [{ name: 'Р1', themes: [{ name: 'Т', questions: [
     { value: 100, text: 'a', answer: 'b' },
     { value: 200, text: 'c', answer: 'd' },
   ] }] }],
+  shop: [shopItem],
 };
 
 let dir: string;
@@ -33,7 +37,8 @@ const sample = (): GameState => ({
   playedCells: ['0/0/0'],
   currentRound: 0,
   activeQuestion: { id: '0/0/1', answeringPlayerId: 'p1', wrongPlayerIds: ['p2'] },
-  shop: { open: false, items: [], purchases: [] },
+  shop: { open: false, purchases: [] },
+  activeGameId: 'g-aaaaaaaa',
 });
 
 describe('persistence', () => {
@@ -76,7 +81,7 @@ describe('persistence', () => {
   });
 
   it('leaves no .tmp file after save', () => {
-    saveState(file, initialState());
+    saveState(file, initialState('g-aaaaaaaa'));
     expect(fs.existsSync(file)).toBe(true);
     expect(fs.existsSync(file + '.tmp')).toBe(false);
   });
@@ -95,8 +100,36 @@ describe('persistence', () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  it('reads activeGameId back, empty string when absent', () => {
+    saveState(file, sample());
+    expect(loadState(file, pack)!.activeGameId).toBe('g-aaaaaaaa');
+    const o: any = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete o.activeGameId;
+    fs.writeFileSync(file, JSON.stringify(o));
+    expect(loadState(file, pack)!.activeGameId).toBe('');
+  });
+
+  describe('readActiveGameId', () => {
+    it('returns the id from the file', () => {
+      saveState(file, sample());
+      expect(readActiveGameId(file)).toBe('g-aaaaaaaa');
+    });
+
+    it('returns null for missing file and broken JSON without renaming', () => {
+      expect(readActiveGameId(file)).toBeNull();
+      fs.writeFileSync(file, '{"phase":');
+      expect(readActiveGameId(file)).toBeNull();
+      expect(fs.existsSync(file)).toBe(true);
+      expect(fs.existsSync(file + '.bak')).toBe(false);
+    });
+
+    it('returns null when activeGameId is not a string', () => {
+      fs.writeFileSync(file, JSON.stringify({ phase: 'lobby', players: [] }));
+      expect(readActiveGameId(file)).toBeNull();
+    });
+  });
+
   describe('shop', () => {
-    const item = { name: 'Приз', description: 'д', price: 10, quantity: 2, hidden: false };
     const write = (patch: (o: any) => void) => {
       const o: any = JSON.parse(JSON.stringify(sample()));
       patch(o);
@@ -105,35 +138,32 @@ describe('persistence', () => {
 
     it('old state.json without shop loads with empty shop', () => {
       write((o) => { delete o.shop; });
-      expect(loadState(file, pack)!.shop).toEqual({ open: false, items: [], purchases: [] });
+      expect(loadState(file, pack)!.shop).toEqual({ open: false, purchases: [] });
     });
 
     it('round-trips shop including open flag', () => {
       const s = sample();
-      s.shop = {
-        open: true,
-        items: [{ id: 'i1', ...item }],
-        purchases: [{ id: 'u1', itemId: 'i1', playerId: 'p1', price: 10, at: 5 }],
-      };
+      s.shop = { open: true, purchases: [{ id: 'u1', itemId: 'i1', playerId: 'p1', price: 10, at: 5 }] };
       saveState(file, s);
       expect(loadState(file, pack)!.shop).toEqual(s.shop);
     });
 
-    it('drops invalid items and orphan purchases', () => {
+    it('legacy shop.items are ignored; invalid and orphan purchases dropped', () => {
       write((o) => {
         o.shop = {
           open: true,
-          items: [{ id: 'i1', ...item }, { id: 'bad', name: '' }, { id: 'i1', ...item }],
+          items: [{ id: 'old', name: 'Старый', description: '', price: 1, quantity: 1, hidden: false }],
           purchases: [
             { id: 'u1', itemId: 'i1', playerId: 'p1', price: 10, at: 5 },
             { id: 'u2', itemId: 'nope', playerId: 'p1', price: 10, at: 5 },
             { id: 'u3', itemId: 'i1', playerId: 'ghost', price: 10, at: 5 },
             { id: 'u4', itemId: 'i1', playerId: 'p1', price: 1.5, at: 5 },
+            { id: 'u5', itemId: 'old', playerId: 'p1', price: 1, at: 5 },
           ],
         };
       });
       const shop = loadState(file, pack)!.shop;
-      expect(shop.items).toHaveLength(1);
+      expect(shop).not.toHaveProperty('items');
       expect(shop.purchases.map((p) => p.id)).toEqual(['u1']);
     });
   });

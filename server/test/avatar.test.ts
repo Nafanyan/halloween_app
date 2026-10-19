@@ -8,7 +8,7 @@ const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0])
 const WEBP = Uint8Array.from([...Buffer.from('RIFF'), 1, 2, 3, 4, ...Buffer.from('WEBP'), 0]);
 
 const withPlayer = (): GameState => {
-  const r = L.registerPlayer(L.initialState(), 'Anna', 'p1');
+  const r = L.registerPlayer(L.initialState('g-aaaaaaaa'), 'Anna', 'p1');
   if (!r.ok) throw new Error(r.error);
   return r.state;
 };
@@ -36,6 +36,6 @@ describe('avatar', () => {
     expect('avatar' in cleared.state.players[0]).toBe(false);
   });
   it('setAvatar: unknown player → NOT_FOUND', () => {
-    expect(setAvatar(L.initialState(), 'nope', '/media/avatars/x.jpg')).toEqual({ ok: false, error: 'NOT_FOUND' });
+    expect(setAvatar(L.initialState('g-aaaaaaaa'), 'nope', '/media/avatars/x.jpg')).toEqual({ ok: false, error: 'NOT_FOUND' });
   });
 });

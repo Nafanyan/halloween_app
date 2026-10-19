@@ -1,23 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import type { GameState, QuestionPack } from '@quiz/shared';
+import type { ActiveGame, GameState, ShopItem } from '@quiz/shared';
 import { initialState } from '../src/game/logic';
-import { toAdminView, toPublicView, trophiesOf } from '../src/views';
+import { editView, summarize, toAdminView, toPublicView, trophiesOf } from '../src/views';
 
 const SECRET = 'SECRET-ANSWER-XYZ';
 const JOIN = 'http://192.168.0.5:3000/';
+const GID = 'g-aaaaaaaa';
 
 const theme = (n: string) => ({
   name: n,
   questions: [100, 200].map((value) => ({ value, text: `q${value}`, answer: SECRET })),
 });
-const pack = (): QuestionPack => ({
-  rounds: [
-    { name: 'Первый', themes: [theme('A'), theme('B')] },
-    { name: 'Второй', themes: [theme('C')] },
-  ],
+const pack = (shop: ShopItem[] = []): ActiveGame => ({
+  id: GID,
+  def: {
+    version: 1, title: 'Хэллоуин', subtitle: 'Подзаголовок', description: 'о', background: 'bg.jpg',
+    scoring: { wrongPenalty: false, startScore: 0 },
+    rounds: [
+      { name: 'Первый', themes: [theme('A'), theme('B')] },
+      { name: 'Второй', themes: [theme('C')] },
+    ],
+    shop,
+  },
 });
 const game = (over: Partial<GameState> = {}): GameState => ({
-  ...initialState(),
+  ...initialState(GID),
   phase: 'game',
   players: [
     { id: 'p1', name: 'Вася', score: 100, online: true },
@@ -104,48 +111,88 @@ describe('toPublicView', () => {
     expect(v.phase).toBe('lobby');
     expect(v.joinUrl).toBe(JOIN);
   });
+
+  it('game block carries id, title, subtitle and media URLs', () => {
+    expect(toPublicView(game(), pack(), JOIN).game).toEqual({
+      id: GID, title: 'Хэллоуин', subtitle: 'Подзаголовок', background: `/games/${GID}/media/bg.jpg`,
+    });
+  });
+
+  it('question image and audio become URLs', () => {
+    const g = pack();
+    g.def.rounds[0].themes[0].questions[0] = { value: 100, text: 'q', answer: 'a', image: 'izba.svg', audio: 'a b.mp3' };
+    const s = game({ activeQuestion: { id: '0/0/0', answeringPlayerId: null, wrongPlayerIds: [] } });
+    const q = toPublicView(s, g, JOIN).activeQuestion!;
+    expect(q.image).toBe(`/games/${GID}/media/izba.svg`);
+    expect(q.audio).toBe(`/games/${GID}/media/a%20b.mp3`);
+  });
 });
 
 describe('toAdminView', () => {
   it('contains the answer of the active question', () => {
     const s = game({ activeQuestion: { id: '0/1/1', answeringPlayerId: null, wrongPlayerIds: [] } });
-    const v = toAdminView(s, pack(), JOIN);
+    const v = toAdminView(s, pack(), JOIN, [], null);
     expect(v.activeQuestion?.answer).toBe(SECRET);
     expect(v.activeQuestion?.themeName).toBe('B');
   });
 
   it('has null active question when there is none', () => {
-    expect(toAdminView(game(), pack(), JOIN).activeQuestion).toBeNull();
+    expect(toAdminView(game(), pack(), JOIN, [], null).activeQuestion).toBeNull();
   });
 
-  it('matches the public view apart from the answer', () => {
+  it('passes games and editing through', () => {
+    const games = [summarize({ id: GID, def: pack().def }, GID)];
+    const editing = editView(game(), pack(), GID);
+    const v = toAdminView(game(), pack(), JOIN, games, editing);
+    expect(v.games).toBe(games);
+    expect(v.editing).toBe(editing);
+  });
+
+  it('matches the public view apart from the answer, shop, games and editing', () => {
     const s = game({
       playedCells: ['0/0/0'],
       activeQuestion: { id: '0/0/1', answeringPlayerId: 'p1', wrongPlayerIds: [] },
     });
     const pub = toPublicView(s, pack(), JOIN);
-    const adm = toAdminView(s, pack(), JOIN);
+    const adm = toAdminView(s, pack(), JOIN, [], null);
     const { answer, ...rest } = adm.activeQuestion!;
     expect(answer).toBe(SECRET);
-    expect({ ...adm, activeQuestion: rest, shop: pub.shop }).toEqual(pub);
+    const { games, editing, ...admRest } = adm;
+    expect({ ...admRest, activeQuestion: rest, shop: pub.shop }).toEqual(pub);
+  });
+});
+
+describe('summarize', () => {
+  it('broken entry', () => {
+    expect(summarize({ id: GID, error: 'oops' }, GID)).toEqual({
+      id: GID, title: GID, description: '', rounds: 0, questions: 0, active: false, error: 'oops',
+    });
+  });
+
+  it('counts questions across rounds and flags active', () => {
+    expect(summarize({ id: GID, def: pack().def }, GID)).toEqual({
+      id: GID, title: 'Хэллоуин', description: 'о', rounds: 2, questions: 6, active: true,
+    });
+    expect(summarize({ id: GID, def: pack().def }, 'other').active).toBe(false);
   });
 });
 
 describe('shop projections', () => {
   const HIDDEN_SECRET = 'ТАЙНЫЙ-ПРЕДМЕТ-QWE';
-  const hiddenItem = {
+  const hiddenItem: ShopItem = {
     id: 'i1', name: HIDDEN_SECRET, description: HIDDEN_SECRET, price: 300, quantity: 2,
-    hidden: true, image: '/media/shop/secret-1.jpg',
+    hidden: true, image: 'secret-1.jpg',
   };
-  const openItem = {
+  const openItem: ShopItem = {
     id: 'i2', name: 'Кружка', description: 'Тыквенная', price: 50, quantity: 3,
-    hidden: false, image: '/media/shop/mug.png',
+    hidden: false, image: 'mug.png',
   };
+  const mug = `/games/${GID}/media/mug.png`;
+  const shopPack = (items: ShopItem[] = [hiddenItem, openItem]) => pack(items);
   const shopGame = () =>
     game({
       shop: {
         open: true,
-        items: [hiddenItem, openItem],
         purchases: [
           { id: 'b1', itemId: 'i1', playerId: 'p1', price: 300, at: 10 },
           { id: 'b2', itemId: 'i2', playerId: 'p2', price: 50, at: 20 },
@@ -155,8 +202,7 @@ describe('shop projections', () => {
     });
 
   it('hidden item content never reaches public view', () => {
-    const s = shopGame();
-    const v = toPublicView(s, pack(), JOIN);
+    const v = toPublicView(shopGame(), shopPack(), JOIN);
     const json = JSON.stringify(v);
     expect(json).not.toContain(HIDDEN_SECRET);
     expect(json).not.toContain('secret-1');
@@ -164,35 +210,61 @@ describe('shop projections', () => {
     expect(v.shop.items[0]).toEqual({ id: 'i1', hidden: true, price: 300, quantity: 2, remaining: 1 });
   });
 
-  it('open item shows name, description, image, remaining', () => {
-    const v = toPublicView(shopGame(), pack(), JOIN);
+  it('open item shows name, description, image URL, remaining', () => {
+    const v = toPublicView(shopGame(), shopPack(), JOIN);
     expect(v.shop.items[1]).toEqual({
       id: 'i2', hidden: false, price: 50, quantity: 3, remaining: 1,
-      name: 'Кружка', description: 'Тыквенная', image: '/media/shop/mug.png',
+      name: 'Кружка', description: 'Тыквенная', image: mug,
     });
   });
 
   it('remaining is clamped at 0', () => {
-    const s = shopGame();
-    s.shop.items = [{ ...openItem, quantity: 1 }];
-    expect(toPublicView(s, pack(), JOIN).shop.items[0].remaining).toBe(0);
+    const v = toPublicView(shopGame(), shopPack([{ ...openItem, quantity: 1 }]), JOIN);
+    expect(v.shop.items[0].remaining).toBe(0);
   });
 
-  it('admin view has full items and purchases newest first with names', () => {
-    const v = toAdminView(shopGame(), pack(), JOIN);
-    expect(v.shop.items[0]).toEqual({ ...hiddenItem, remaining: 1 });
+  it('admin view has full items (file name + imageUrl) and purchases newest first with names', () => {
+    const v = toAdminView(shopGame(), shopPack(), JOIN, [], null);
+    expect(v.shop.items[0]).toEqual({ ...hiddenItem, remaining: 1, imageUrl: `/games/${GID}/media/secret-1.jpg` });
     expect(v.shop.purchases.map((p) => p.id)).toEqual(['b3', 'b2', 'b1']);
     expect(v.shop.purchases[0]).toEqual({
       id: 'b3', itemId: 'i2', itemName: 'Кружка', playerId: 'p1', playerName: 'Вася', price: 50, at: 30,
     });
   });
 
-  it('trophiesOf returns only that player\'s items, full content, in purchase order', () => {
+  it("trophiesOf returns only that player's items with image URLs, in purchase order", () => {
     const s = shopGame();
-    expect(trophiesOf(s, 'p1')).toEqual([
-      { purchaseId: 'b1', item: hiddenItem },
-      { purchaseId: 'b3', item: openItem },
+    expect(trophiesOf(s, shopPack(), 'p1')).toEqual([
+      { purchaseId: 'b1', item: { ...hiddenItem, image: `/games/${GID}/media/secret-1.jpg` } },
+      { purchaseId: 'b3', item: { ...openItem, image: mug } },
     ]);
-    expect(trophiesOf(s, 'p3')).toEqual([]);
+    expect(trophiesOf(s, shopPack(), 'p3')).toEqual([]);
+  });
+
+  describe('editView', () => {
+    const g = () => {
+      const a = shopPack();
+      a.def.lobbyMusic = 'music.mp3';
+      return a;
+    };
+
+    it('inactive game: remaining equals quantity, imageUrl and media URLs set', () => {
+      const v = editView(shopGame(), g(), 'other');
+      expect(v.active).toBe(false);
+      expect(v.shop.map((i) => i.remaining)).toEqual([2, 3]);
+      expect(v.shop[1].imageUrl).toBe(mug);
+      expect(v.media).toEqual({ lobbyMusic: `/games/${GID}/media/music.mp3`, background: `/games/${GID}/media/bg.jpg` });
+      expect(v.settings.lobbyMusic).toBe('music.mp3');
+      expect(v.rounds).toEqual([
+        { name: 'Первый', themes: 2, questions: 4 },
+        { name: 'Второй', themes: 1, questions: 2 },
+      ]);
+    });
+
+    it('active game: remaining accounts for purchases', () => {
+      const v = editView(shopGame(), g(), GID);
+      expect(v.active).toBe(true);
+      expect(v.shop.map((i) => i.remaining)).toEqual([1, 1]);
+    });
   });
 });
