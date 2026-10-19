@@ -40,3 +40,15 @@
 .game-card p { margin: 0.3em 0; }
 .game-badge { font-size: 12px; color: var(--gold); border: 1px solid var(--gold); border-radius: 6px; padding: 0.1em 0.5em; }
 .media-field { display: flex; flex-direction: column; gap: 4px; }
+
+.q-panel { display: flex; flex-direction: column; gap: 10px; }
+.q-locked { margin: 0; padding: 0.6em 0.8em; border: 1px solid var(--gold); border-radius: 8px; background: rgba(18, 13, 11, 0.6); color: var(--gold); }
+.q-round { border-left: 1px solid var(--gold); padding-left: 10px; display: flex; flex-direction: column; gap: 8px; }
+.q-theme { border-left: 1px solid var(--gold-dim); padding-left: 10px; margin-left: 6px; display: flex; flex-direction: column; gap: 6px; }
+.q-question { margin-left: 6px; }
+.q-head input[type='text'] { flex: 1 1 10em; min-width: 0; font: inherit; color: var(--text); background: rgba(18, 13, 11, 0.6); border: 1px solid var(--gold-dim); border-radius: 8px; padding: 0.4em 0.6em; }
+.q-text { flex: 1 1 10em; min-width: 0; overflow-wrap: anywhere; }
+.q-form { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.q-form textarea, .q-form input[type='text'], .q-form input[type='number'], .q-form select { width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: rgba(18, 13, 11, 0.6); border: 1px solid var(--gold-dim); border-radius: 8px; padding: 0.5em; }
+.q-form input[type='file'] { color: var(--muted); max-width: 100%; }
+.q-panel .btn.small { padding: 0.2em 0.6em; }

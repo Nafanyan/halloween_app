@@ -7,10 +7,11 @@ interface Props {
   accept: 'image' | 'audio';
   url?: string;
   gameId: string;
+  disabled?: boolean;
   onChange: (file: string | undefined) => void;
 }
 
-export function MediaField({ label, accept, url, gameId, onChange }: Props) {
+export function MediaField({ label, accept, url, gameId, disabled, onChange }: Props) {
   const [preview, setPreview] = useState<string | undefined>(url);
   const [uploading, setUploading] = useState(false);
 
@@ -48,14 +49,14 @@ export function MediaField({ label, accept, url, gameId, onChange }: Props) {
     <div className="media-field">
       <span>{label}</span>
       <input
-        type="file" accept={accept === 'image' ? 'image/*' : 'audio/*'} disabled={uploading}
+        type="file" accept={accept === 'image' ? 'image/*' : 'audio/*'} disabled={uploading || disabled}
         onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }}
       />
       {uploading && <span className="muted">Загрузка…</span>}
       {preview && (
         <div className="admin-row">
           {accept === 'image' ? <img className="item-thumb" src={preview} alt="" /> : <audio controls src={preview} />}
-          <button type="button" className="btn" onClick={clear}>Убрать</button>
+          <button type="button" className="btn" disabled={disabled} onClick={clear}>Убрать</button>
         </div>
       )}
     </div>

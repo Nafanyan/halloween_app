@@ -18,6 +18,8 @@ const MESSAGES: Partial<Record<ErrorCode, string>> = {
   GAME_ACTIVE: 'Нельзя удалить активную игру',
   INVALID_SETTINGS: 'Проверьте поля настроек',
   SAVE_FAILED: 'Не удалось сохранить',
+  GAME_LOCKED: 'Игра идёт — вопросы можно менять в лобби',
+  INVALID_QUESTIONS: 'Проверьте поля вопроса',
 };
 
 export const errorMessage = (code: ErrorCode): string => MESSAGES[code] ?? 'Ошибка';
