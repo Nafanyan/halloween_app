@@ -3,67 +3,113 @@ import http from 'node:http';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
-import { Server, type Socket } from 'socket.io';
+import { Server } from 'socket.io';
 import type {
-  AudioAction, ClientToServerEvents, ErrorCode, GameState, Result, ServerToClientEvents,
+  ActiveGame, AudioAction, ClientToServerEvents, GameState, Result, ServerToClientEvents,
 } from '@quiz/shared';
-import { loadQuestions } from './questions';
-import { loadState, saveState } from './persistence';
-import { toAdminView, toPublicView, trophiesOf } from './views';
+import { loadState, readActiveGameId, saveState } from './persistence';
+import { clientItem, editView, mediaUrl, summarize, toAdminView, toPublicView, trophiesOf } from './views';
 import * as logic from './game/logic';
 import * as shop from './game/shop';
 import { imageExt, setAvatar } from './game/avatar';
+import { GameLibrary } from './games/store';
+import { migrate } from './games/migrate';
+import { GAME_ID_RE } from './games/validate';
+import { MAX_MEDIA_BYTES, detectMedia } from './games/upload';
+import {
+  type AckFn, type QuizSocket, type SocketData, ackOf, fail, findGame, obj, registerGameHandlers,
+} from './games/handlers';
 
 export interface QuizServerOptions {
-  questionsPath: string; mediaDir: string; statePath: string;
+  dataDir: string; statePath: string;
   pin: string; joinUrl: string; clientDist?: string;
 }
 
-interface SocketData { isAdmin?: boolean; playerId?: string }
-type QuizSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
-type AckFn = (r: unknown) => void;
-
 const AUDIO_ACTIONS: AudioAction[] = ['play', 'pause', 'restart'];
 const noop: AckFn = () => {};
-const ackOf = (v: unknown): AckFn => (typeof v === 'function' ? (v as AckFn) : noop);
-const fail = (error: ErrorCode) => ({ ok: false as const, error });
-const obj = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null ? v as Record<string, unknown> : {});
-const IMAGE_EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-const mediaType = (header: string | undefined) => (header ?? '').split(';')[0].trim().toLowerCase();
 const MAX_AVATAR_BYTES = 1024 * 1024;
 const playerRoom = (id: string) => `player:${id}`;
+/** Загруженный SVG раздаётся с того же origin — запрещаем ему скрипты и чужие ресурсы. */
+const MEDIA_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; media-src 'self'; sandbox";
+
+/** Библиотека игр и стартовое состояние: миграция, выбор активной игры, уборка медиа. */
+function openLibrary(opts: QuizServerOptions): { lib: GameLibrary; state: GameState } {
+  const gamesDir = path.join(opts.dataDir, 'games');
+  const fresh = !fs.existsSync(gamesDir);
+  const lib = new GameLibrary(gamesDir);
+  if (fresh) migrate({ dataDir: opts.dataDir, statePath: opts.statePath, lib });
+
+  const saved = readActiveGameId(opts.statePath);
+  const usable = (id: string | null): id is string => id !== null && GAME_ID_RE.test(id) && lib.def(id) !== null;
+  const id = usable(saved) ? saved
+    : lib.entries().find((e) => 'def' in e)?.id ?? lib.create('Новая игра').id;
+  const def = lib.def(id)!;
+  let state = loadState(opts.statePath, def) ?? logic.initialState(id);
+  if (state.activeGameId !== id) {
+    state = logic.activateGame(state, id, def.scoring.startScore);
+    saveState(opts.statePath, state);
+  }
+  for (const e of lib.entries()) {
+    if (!('def' in e)) continue;
+    try {
+      lib.sweepMedia(e.id);
+    } catch (err) {
+      console.warn(`[games] ${e.id}: не удалось убрать лишние медиа (${(err as Error).message})`);
+    }
+  }
+  return { lib, state };
+}
 
 export function createQuizServer(opts: QuizServerOptions) {
-  const pack = loadQuestions(opts.questionsPath, opts.mediaDir);
-  let state: GameState = loadState(opts.statePath, pack) ?? logic.initialState();
+  const { lib, state: initial } = openLibrary(opts);
+  let state: GameState = initial;
+  const avatarsDir = path.join(opts.dataDir, 'media', 'avatars');
   const connections = new Map<string, Set<string>>();
+  /** Активная игра всегда исправна: битую нельзя активировать, активную — удалить. */
+  const active = (): ActiveGame => ({ id: state.activeGameId, def: lib.def(state.activeGameId)! });
 
   const app = express();
   app.post(
-    '/api/shop/image',
+    '/api/games/:id/media',
     (req: express.Request, res: express.Response, next: express.NextFunction) => {
       if (req.header('x-admin-pin') !== opts.pin) return void res.status(401).json({ error: 'UNAUTHORIZED' });
-      if (!(mediaType(req.header('content-type')) in IMAGE_EXT)) {
-        return void res.status(415).json({ error: 'UNSUPPORTED_TYPE' });
-      }
+      if (typeof findGame(lib, req.params.id) === 'string') return void res.status(404).json({ error: 'NOT_FOUND' });
       next();
     },
-    express.raw({ type: Object.keys(IMAGE_EXT), limit: '5mb' }),
+    express.raw({ type: () => true, limit: '20mb' }),
     (req: express.Request, res: express.Response) => {
       const body: unknown = req.body;
-      if (!Buffer.isBuffer(body) || body.length === 0) return void res.status(415).json({ error: 'UNSUPPORTED_TYPE' });
-      const dir = path.join(opts.mediaDir, 'shop');
-      fs.mkdirSync(dir, { recursive: true });
-      const name = `${randomUUID()}.${IMAGE_EXT[mediaType(req.header('content-type'))]}`;
-      fs.writeFileSync(path.join(dir, name), body);
-      res.json({ url: `/media/shop/${name}` });
+      const media = Buffer.isBuffer(body) && body.length > 0 ? detectMedia(body) : null;
+      if (!media) return void res.status(415).json({ error: 'UNSUPPORTED_TYPE' });
+      const bytes = body as Buffer;
+      if (bytes.length > MAX_MEDIA_BYTES[media.kind]) return void res.status(413).json({ error: 'TOO_LARGE' });
+      const id = req.params.id;
+      const file = `${randomUUID()}.${media.ext}`;
+      try {
+        fs.mkdirSync(lib.mediaDir(id), { recursive: true });
+        fs.writeFileSync(path.join(lib.mediaDir(id), file), bytes);
+      } catch {
+        return void res.status(500).json({ error: 'SAVE_FAILED' });
+      }
+      res.json({ file, url: mediaUrl(id, file) });
     },
     (err: { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
       if (err.type === 'entity.too.large') return void res.status(413).json({ error: 'TOO_LARGE' });
       next(err);
     },
   );
-  app.use('/media', express.static(opts.mediaDir));
+  app.get('/games/:id/media/:file', (req: express.Request, res: express.Response) => {
+    const { id, file } = req.params;
+    const notFound = () => void res.status(404).json({ error: 'NOT_FOUND' });
+    if (!GAME_ID_RE.test(id) || !lib.get(id)) return notFound();
+    if (file !== path.basename(file) || file.includes('\\') || file.startsWith('.')) return notFound();
+    res.setHeader('Content-Security-Policy', MEDIA_CSP);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(file, { root: lib.mediaDir(id), dotfiles: 'deny' }, (err) => {
+      if (err && !res.headersSent) notFound();
+    });
+  });
+  app.use('/media/avatars', express.static(avatarsDir));
   if (opts.clientDist && fs.existsSync(opts.clientDist)) {
     const dist = opts.clientDist;
     app.use(express.static(dist));
@@ -77,19 +123,44 @@ export function createQuizServer(opts: QuizServerOptions) {
   function deleteAvatarFile(url: string | undefined): void {
     if (!url) return;
     try {
-      fs.rmSync(path.join(opts.mediaDir, 'avatars', path.basename(url)), { force: true });
+      fs.rmSync(path.join(avatarsDir, path.basename(url)), { force: true });
     } catch { /* best effort */ }
   }
 
   const avatarsOf = (ids: string[]) =>
     state.players.filter((pl) => ids.includes(pl.id)).map((pl) => pl.avatar);
 
+  function sendAdmin(socket: QuizSocket): void {
+    const games = lib.entries().map((e) => summarize(e, state.activeGameId));
+    const editingId = socket.data.editingId;
+    const def = editingId ? lib.def(editingId) : null;
+    if (!def) socket.data.editingId = undefined;
+    const editing = editingId && def ? editView(state, { id: editingId, def }, state.activeGameId) : null;
+    socket.emit('state:admin', toAdminView(state, active(), opts.joinUrl, games, editing));
+  }
+
+  /** У каждого админ-сокета своя открытая в редакторе игра, поэтому — по одному. */
+  function emitAdmins(): void {
+    for (const s of io.sockets.sockets.values()) if (s.data.isAdmin) sendAdmin(s);
+  }
+
+  function emitAll(): void {
+    const game = active();
+    io.emit('state:public', toPublicView(state, game, opts.joinUrl));
+    emitAdmins();
+    for (const id of connections.keys()) io.to(playerRoom(id)).emit('player:trophies', trophiesOf(state, game, id));
+  }
+
   function commit(next: GameState): void {
     state = next;
     saveState(opts.statePath, state);
-    io.emit('state:public', toPublicView(state, pack, opts.joinUrl));
-    io.to('admin').emit('state:admin', toAdminView(state, pack, opts.joinUrl));
-    for (const id of connections.keys()) io.to(playerRoom(id)).emit('player:trophies', trophiesOf(state, id));
+    emitAll();
+  }
+
+  /** После правки игры в библиотеке: активная видна всем, остальные — только админам. */
+  function changed(gameId: string): void {
+    if (gameId === state.activeGameId) emitAll();
+    else emitAdmins();
   }
 
   function apply(result: Result, ack: AckFn): void {
@@ -105,7 +176,7 @@ export function createQuizServer(opts: QuizServerOptions) {
     let set = connections.get(playerId);
     if (!set) connections.set(playerId, (set = new Set()));
     set.add(socket.id);
-    socket.emit('player:trophies', trophiesOf(s, playerId));
+    socket.emit('player:trophies', trophiesOf(s, active(), playerId));
     return set.size === 1 ? logic.setOnline(s, playerId, true) : s;
   }
 
@@ -142,11 +213,12 @@ export function createQuizServer(opts: QuizServerOptions) {
     const authId = obj(socket.handshake.auth).playerId;
     const bound = typeof authId === 'string' && logic.hasPlayer(state, authId) ? bind(socket, authId, state) : state;
     if (bound !== state) commit(bound); // broadcast includes this socket
-    else socket.emit('state:public', toPublicView(state, pack, opts.joinUrl));
+    else socket.emit('state:public', toPublicView(state, active(), opts.joinUrl));
 
     socket.on('player:join', (p, ack) => {
       const reply = ackOf(ack);
-      const reg = logic.registerPlayer(state, String(obj(p).name ?? ''), randomUUID());
+      const name = String(obj(p).name ?? '');
+      const reg = logic.registerPlayer(state, name, randomUUID(), active().def.scoring.startScore);
       if (!reg.ok) return reply(reg);
       commit(bind(socket, reg.player.id, unbind(socket, reg.state)));
       reply({ ok: true, playerId: reg.player.id });
@@ -184,10 +256,9 @@ export function createQuizServer(opts: QuizServerOptions) {
       const ext = bytes && bytes.length > 0 && bytes.length <= MAX_AVATAR_BYTES ? imageExt(bytes) : null;
       if (!bytes || !ext) return reply(fail('INVALID_IMAGE'));
       const name = `${randomUUID()}.${ext}`;
-      const dir = path.join(opts.mediaDir, 'avatars');
       try {
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, name), bytes);
+        fs.mkdirSync(avatarsDir, { recursive: true });
+        fs.writeFileSync(path.join(avatarsDir, name), bytes);
       } catch {
         deleteAvatarFile(`/media/avatars/${name}`);
         return reply(fail('INVALID_IMAGE'));
@@ -207,7 +278,7 @@ export function createQuizServer(opts: QuizServerOptions) {
       socket.data.isAdmin = true;
       socket.join('admin');
       reply({ ok: true });
-      socket.emit('state:admin', toAdminView(state, pack, opts.joinUrl));
+      sendAdmin(socket);
     });
 
     /** Registers an admin-only handler; `run` gets the first argument as payload. */
@@ -220,13 +291,13 @@ export function createQuizServer(opts: QuizServerOptions) {
     };
 
     const str = (v: unknown) => (typeof v === 'string' ? v : null);
-    onAdmin('admin:startGame', () => logic.startGame(state));
-    onAdmin('admin:selectRound', (p) => logic.selectRound(state, pack, p.index as number));
+    onAdmin('admin:startGame', () => logic.startGame(state, active().def));
+    onAdmin('admin:selectRound', (p) => logic.selectRound(state, active().def, p.index as number));
     onAdmin('admin:openQuestion', (p) =>
-      typeof p.id === 'string' ? logic.openQuestion(state, pack, p.id)
+      typeof p.id === 'string' ? logic.openQuestion(state, active().def, p.id)
         : state.phase !== 'game' ? fail('WRONG_PHASE') : fail('NOT_FOUND'));
-    onAdmin('admin:correct', () => logic.judgeCorrect(state, pack));
-    onAdmin('admin:wrong', () => logic.judgeWrong(state));
+    onAdmin('admin:correct', () => logic.judgeCorrect(state, active().def));
+    onAdmin('admin:wrong', () => logic.judgeWrong(state, active().def));
     onAdmin('admin:partial', (p) => logic.judgePartial(state, p.points as number));
     onAdmin('admin:close', () => logic.closeQuestion(state));
     onAdmin('admin:adjustScore', (p) => logic.adjustScore(state, p.playerId as string, p.delta as number));
@@ -244,7 +315,8 @@ export function createQuizServer(opts: QuizServerOptions) {
       const avatars = removing ? avatarsOf(state.players.map((pl) => pl.id)) : [];
       if (removing) evict(state.players.map((pl) => pl.id));
       avatars.forEach(deleteAvatarFile);
-      return { ok: true, state: logic.newGame(state, { removePlayers: removing }) };
+      const startScore = active().def.scoring.startScore;
+      return { ok: true, state: logic.newGame(state, { removePlayers: removing, startScore }) };
     });
     onAdmin('admin:clearAvatar', (p) => {
       const id = str(p.playerId);
@@ -256,15 +328,6 @@ export function createQuizServer(opts: QuizServerOptions) {
     });
 
     onAdmin('admin:shopOpen', (p) => shop.setShopOpen(state, p.open === true));
-    onAdmin('admin:itemAdd', (p) => shop.addItem(state, p.item, randomUUID()));
-    onAdmin('admin:itemUpdate', (p) => {
-      const id = str(p.id);
-      return id === null ? fail('NOT_FOUND') : shop.updateItem(state, id, p.item);
-    });
-    onAdmin('admin:itemDelete', (p) => {
-      const id = str(p.id);
-      return id === null ? fail('NOT_FOUND') : shop.deleteItem(state, id);
-    });
     onAdmin('admin:cancelPurchase', (p) => {
       const id = str(p.purchaseId);
       return id === null ? fail('NOT_FOUND') : shop.cancelPurchase(state, id);
@@ -277,12 +340,14 @@ export function createQuizServer(opts: QuizServerOptions) {
       const playerId = str(p.playerId);
       if (itemId === null || playerId === null) return reply(fail('NOT_FOUND'));
       const purchaseId = randomUUID();
-      const item = state.shop.items.find((i) => i.id === itemId);
+      const game = active();
+      const item = game.def.shop.find((i) => i.id === itemId);
       const buyer = state.players.find((pl) => pl.id === playerId);
-      const result = shop.sellItem(state, itemId, playerId, purchaseId, Date.now());
+      const result = shop.sellItem(state, game.def.shop, itemId, playerId, purchaseId, Date.now());
       if (result.ok && item && buyer) {
         io.to('screen').emit('shop:purchased', {
-          purchaseId, playerName: buyer.name, ...(buyer.avatar && { playerAvatar: buyer.avatar }), item,
+          purchaseId, playerName: buyer.name, ...(buyer.avatar && { playerAvatar: buyer.avatar }),
+          item: clientItem(game.id, item),
         });
       }
       apply(result, reply);
@@ -296,6 +361,8 @@ export function createQuizServer(opts: QuizServerOptions) {
       io.to('screen').emit('screen:audio', { action });
       reply({ ok: true });
     });
+
+    registerGameHandlers(socket, { lib, state: () => state, commit, changed, sendAdmin });
 
     socket.on('disconnect', () => {
       const next = unbind(socket, state);

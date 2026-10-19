@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +18,7 @@ const AVATAR_URL = /^\/media\/avatars\/[0-9a-f-]{36}\.jpg$/;
 let dir: string;
 let questionsPath: string;
 let mediaDir: string;
+const views = new WeakMap<Client, PublicView>();
 let statePath: string;
 let servers: Server[];
 let clients: Client[];
@@ -45,7 +46,7 @@ afterEach(async () => {
 });
 
 async function start(): Promise<string> {
-  const server = createQuizServer({ questionsPath, mediaDir, statePath, pin: PIN, joinUrl: 'http://test/' });
+  const server = createQuizServer({ dataDir: dir, statePath, pin: PIN, joinUrl: 'http://test/' });
   servers.push(server);
   await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
   return `http://localhost:${(server.httpServer.address() as AddressInfo).port}`;
@@ -62,9 +63,12 @@ function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
 async function connect(url: string): Promise<Client> {
   const c: Client = ioc(url, { forceNew: true, transports: ['websocket'] });
   clients.push(c);
-  await nextEvent(c, 'state:public');
+  views.set(c, await nextEvent(c, 'state:public'));
   return c;
 }
+
+/** Id of the game that was active when the client connected. */
+const gameIdOf = (c: Client) => views.get(c)!.game.id;
 
 function nextEvent<E extends keyof ServerToClientEvents>(
   c: Client, event: E, pred: (...a: Parameters<ServerToClientEvents[E]>) => boolean = () => true,
@@ -87,6 +91,14 @@ async function admin(url: string): Promise<Client> {
   const a = await connect(url);
   expect(await call(a, 'admin:auth', { pin: PIN })).toEqual({ ok: true });
   return a;
+}
+
+/** Authenticates and resolves with the admin view sent right after auth. */
+async function adminView(url: string): Promise<{ a: Client; view: AdminView }> {
+  const a = await connect(url);
+  const first = nextEvent(a, 'state:admin');
+  expect(await call(a, 'admin:auth', { pin: PIN })).toEqual({ ok: true });
+  return { a, view: await first };
 }
 
 async function player(url: string, name: string): Promise<{ c: Client; id: string }> {
@@ -253,7 +265,7 @@ describe('quiz server', () => {
       await call(a, 'admin:startGame');
       await call(a, 'admin:adjustScore', { playerId: buyer.id, delta: 500 });
       const added = nextEvent(a, 'state:admin', (v: AdminView) => v.shop.items.length === 1);
-      expect(await call(a, 'admin:itemAdd', { item })).toEqual({ ok: true });
+      expect(await call(a, 'admin:itemAdd', { gameId: gameIdOf(a), item })).toEqual({ ok: true });
       const view = await added;
       return { screen, buyer, other, a, itemId: view.shop.items[0].id };
     }
@@ -300,7 +312,7 @@ describe('quiz server', () => {
     it('shop admin events need auth', async () => {
       const url = await start();
       const c = await connect(url);
-      expect(await call(c, 'admin:itemAdd', { item })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
+      expect(await call(c, 'admin:itemAdd', { gameId: gameIdOf(c), item })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
       expect(await call(c, 'admin:shopOpen', { open: true })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
       expect(await call(c, 'admin:sell', { itemId: 'x', playerId: 'y' })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
     });
@@ -321,49 +333,336 @@ describe('quiz server', () => {
     it('non-string ids give NOT_FOUND', async () => {
       const url = await start();
       const a = await admin(url);
-      expect(await call(a, 'admin:itemDelete', { id: 5 })).toEqual({ ok: false, error: 'NOT_FOUND' });
+      expect(await call(a, 'admin:itemDelete', { gameId: gameIdOf(a), id: 5 })).toEqual({ ok: false, error: 'NOT_FOUND' });
+      expect(await call(a, 'admin:itemDelete', { gameId: '../x', id: 'a' })).toEqual({ ok: false, error: 'NOT_FOUND' });
       expect(await call(a, 'admin:cancelPurchase', {})).toEqual({ ok: false, error: 'NOT_FOUND' });
     });
   });
 });
 
-describe('shop image upload', () => {
-  const post = (url: string, body: Buffer, headers: Record<string, string>) =>
-    fetch(`${url}/api/shop/image`, { method: 'POST', body: new Uint8Array(body), headers });
+const GAME_ID = /^g-[a-z0-9]{8}$/;
+const gameJson = (id: string) => path.join(dir, 'games', id, 'game.json');
+const readGame = (id: string) => JSON.parse(fs.readFileSync(gameJson(id), 'utf8'));
+const postMedia = (url: string, id: string, body: Buffer, pin = PIN) =>
+  fetch(`${url}/api/games/${id}/media`, { method: 'POST', body: new Uint8Array(body), headers: { 'X-Admin-Pin': pin } });
 
-  it('upload: saves image and serves it under /media/shop', async () => {
+async function stop(): Promise<void> {
+  for (const c of clients.splice(0)) c.disconnect();
+  await servers.pop()!.close();
+}
+
+describe('game library', () => {
+  it('start migrates legacy questions once', async () => {
     const url = await start();
-    const bytes = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    const res = await post(url, bytes, { 'X-Admin-Pin': PIN, 'Content-Type': 'image/png' });
+    const v = views.get(await connect(url))!;
+    expect(v.game.title).toBe('Сумеречный шабаш');
+    expect(v.roundNames).toEqual(['Раунд 1']);
+    expect(v.themes).toEqual([{ name: 'Тема', cells: [
+      { id: '0/0/0', value: 100, played: false },
+      { id: '0/0/1', value: 200, played: false },
+    ] }]);
+
+    await stop();
+    const { view } = await adminView(await start());
+    expect(view.games).toHaveLength(1);
+    expect(view.game.id).toBe(v.game.id);
+  });
+
+  it('migration keeps players, scores and purchases', async () => {
+    fs.writeFileSync(statePath, JSON.stringify({
+      phase: 'game', players: [{ id: 'p1', name: 'Аня', score: 300, online: true }],
+      playedCells: ['0/0/0'], currentRound: 0, activeQuestion: null,
+      shop: {
+        open: false,
+        items: [{ id: 'i1', name: 'Метла', description: '', price: 100, quantity: 2, hidden: false }],
+        purchases: [{ id: 'u1', itemId: 'i1', playerId: 'p1', price: 100, at: 1 }],
+      },
+    }));
+    const url = await start();
+    const { view } = await adminView(url);
+    expect(view.phase).toBe('game');
+    expect(view.players).toEqual([{ id: 'p1', name: 'Аня', score: 300, online: false }]);
+    expect(view.themes[0].cells[0].played).toBe(true);
+    expect(view.shop.items.map((i) => i.name)).toEqual(['Метла']);
+    expect(view.shop.purchases).toMatchObject([{ id: 'u1', itemName: 'Метла', playerName: 'Аня' }]);
+  });
+
+  it('game:create', async () => {
+    const url = await start();
+    const c = await connect(url);
+    expect(await call(c, 'game:create', { title: 'Новая' })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
+    const { a } = await adminView(url);
+    const listed = nextEvent(a, 'state:admin', (v: AdminView) => v.games.length === 2);
+    const r = await call(a, 'game:create', { title: 'Новая' });
+    expect(r).toEqual({ ok: true, id: expect.stringMatching(GAME_ID) });
+    expect((await listed).games.find((g) => g.id === r.id)).toMatchObject({ title: 'Новая', active: false });
+    expect(readGame(r.id).title).toBe('Новая');
+    for (const title of ['', '   ', 'я'.repeat(61), 5, undefined]) {
+      expect(await call(a, 'game:create', { title })).toEqual({ ok: false, error: 'INVALID_SETTINGS' });
+    }
+  });
+
+  it('game:activate an empty game keeps players and resets to lobby', async () => {
+    const url = await start();
+    const { c, id } = await player(url, 'Игрок');
+    const { a } = await adminView(url);
+    await call(a, 'admin:startGame');
+    await call(a, 'admin:adjustScore', { playerId: id, delta: 300 });
+    const { id: gid } = await call(a, 'game:create', { title: 'Новая' });
+    const pub = nextEvent(c, 'state:public', (v: PublicView) => v.game.id === gid);
+    expect(await call(a, 'game:activate', { id: gid })).toEqual({ ok: true });
+    const v = await pub;
+    expect(v.game.title).toBe('Новая');
+    expect(v.phase).toBe('lobby');
+    expect(v.players).toEqual([{ id, name: 'Игрок', score: 0, online: true }]);
+    expect(await call(a, 'admin:startGame')).toEqual({ ok: false, error: 'NO_QUESTIONS' });
+    expect(await call(a, 'game:activate', { id: 'g-zzzzzzzz' })).toEqual({ ok: false, error: 'NOT_FOUND' });
+    expect(await call(c, 'game:activate', { id: gid })).toEqual({ ok: false, error: 'UNAUTHORIZED' });
+  });
+
+  it('game:delete: refuses the active game; removes another and closes its editor', async () => {
+    const url = await start();
+    const { a, view } = await adminView(url);
+    const { a: other } = await adminView(url);
+    expect(await call(a, 'game:delete', { id: view.game.id })).toEqual({ ok: false, error: 'GAME_ACTIVE' });
+    const { id: gid } = await call(a, 'game:create', { title: 'Лишняя' });
+    const opened = nextEvent(other, 'state:admin', (v: AdminView) => v.editing?.id === gid);
+    expect(await call(other, 'game:open', { id: gid })).toEqual({ ok: true });
+    await opened;
+    const closed = nextEvent(other, 'state:admin', (v: AdminView) => v.games.length === 1);
+    expect(await call(a, 'game:delete', { id: gid })).toEqual({ ok: true });
+    expect((await closed).editing).toBeNull();
+    expect(fs.existsSync(path.join(dir, 'games', gid))).toBe(false);
+    expect(await call(a, 'game:delete', { id: gid })).toEqual({ ok: false, error: 'NOT_FOUND' });
+    expect(await call(a, 'game:delete', { id: '..' })).toEqual({ ok: false, error: 'NOT_FOUND' });
+  });
+
+  it('game:open gives editing to that admin socket only', async () => {
+    const url = await start();
+    const { a, view } = await adminView(url);
+    const { a: b } = await adminView(url);
+    const mine = nextEvent(a, 'state:admin', (v: AdminView) => v.editing !== null);
+    expect(await call(a, 'game:open', { id: view.game.id })).toEqual({ ok: true });
+    expect((await mine).editing).toMatchObject({ id: view.game.id, active: true, settings: { title: 'Сумеречный шабаш' } });
+
+    const ofA = nextEvent(a, 'state:admin', (v: AdminView) => v.games.length === 2);
+    const ofB = nextEvent(b, 'state:admin', (v: AdminView) => v.games.length === 2);
+    await call(a, 'game:create', { title: 'Ещё' });
+    expect((await ofA).editing?.id).toBe(view.game.id);
+    expect((await ofB).editing).toBeNull();
+
+    const shut = nextEvent(a, 'state:admin', (v: AdminView) => v.editing === null);
+    expect(await call(a, 'game:open', { id: null })).toEqual({ ok: true });
+    await shut;
+    expect(await call(a, 'game:open', { id: '../..' })).toEqual({ ok: false, error: 'NOT_FOUND' });
+  });
+
+  it('game:updateSettings of the active game reaches state:public; bad values → INVALID_SETTINGS', async () => {
+    const url = await start();
+    const c = await connect(url);
+    const { a, view } = await adminView(url);
+    const id = view.game.id;
+    const settings = { title: 'Шабаш-2', subtitle: 'п', description: 'о', scoring: { wrongPenalty: true, startScore: 50 } };
+    const pub = nextEvent(c, 'state:public', (v: PublicView) => v.game.title === 'Шабаш-2');
+    expect(await call(a, 'game:updateSettings', { id, settings })).toEqual({ ok: true });
+    expect((await pub).game.subtitle).toBe('п');
+    expect(readGame(id)).toMatchObject({ ...settings, rounds: [{ name: 'Раунд 1' }] });
+    for (const lobbyMusic of ['../../state.json', 'missing.mp3', '', null]) {
+      expect(await call(a, 'game:updateSettings', { id, settings: { ...settings, lobbyMusic } }))
+        .toEqual({ ok: false, error: 'INVALID_SETTINGS' });
+    }
+    expect(await call(a, 'game:updateSettings', { id, settings: { ...settings, title: '' } }))
+      .toEqual({ ok: false, error: 'INVALID_SETTINGS' });
+    expect(readGame(id).title).toBe('Шабаш-2');
+
+    // startScore of the active game is given to players who join now.
+    await player(url, 'Новичок');
+    const { view: after } = await adminView(url);
+    expect(after.players.find((p) => p.name === 'Новичок')?.score).toBe(50);
+  });
+
+  it('game:updateSettings: omitting a media key clears it', async () => {
+    const url = await start();
+    const c = await connect(url);
+    const { a, view } = await adminView(url);
+    const id = view.game.id;
+    const { file } = await (await postMedia(url, id, JPEG)).json() as { file: string };
+    const settings = { title: 'Т', subtitle: '', description: '', scoring: { wrongPenalty: false, startScore: 0 } };
+    const withBg = nextEvent(c, 'state:public', (v: PublicView) => v.game.background !== undefined);
+    expect(await call(a, 'game:updateSettings', { id, settings: { ...settings, background: file } })).toEqual({ ok: true });
+    expect((await withBg).game.background).toBe(`/games/${id}/media/${file}`);
+    expect(readGame(id).background).toBe(file);
+    const noBg = nextEvent(c, 'state:public', (v: PublicView) => v.game.background === undefined);
+    expect(await call(a, 'game:updateSettings', { id, settings })).toEqual({ ok: true });
+    await noBg;
+    expect('background' in readGame(id)).toBe(false);
+  });
+
+  it('disk write failure → SAVE_FAILED, game unchanged', async () => {
+    const url = await start();
+    const { a } = await adminView(url);
+    const { id } = await call(a, 'game:create', { title: 'Хрупкая' });
+    fs.rmSync(gameJson(id));
+    fs.mkdirSync(gameJson(id));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const settings = { title: 'Другая', subtitle: '', description: '', scoring: { wrongPenalty: false, startScore: 0 } };
+    expect(await call(a, 'game:updateSettings', { id, settings })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+    const item = { name: 'Метла', description: '', price: 1, quantity: 1, hidden: false };
+    expect(await call(a, 'admin:itemAdd', { gameId: id, item })).toEqual({ ok: false, error: 'SAVE_FAILED' });
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+    const opened = nextEvent(a, 'state:admin', (v: AdminView) => v.editing?.id === id);
+    expect(await call(a, 'game:open', { id })).toEqual({ ok: true });
+    const v = await opened;
+    expect(v.editing!.settings.title).toBe('Хрупкая');
+    expect(v.editing!.shop).toEqual([]);
+  });
+
+  it('duplicate keeps item ids; deleting the item in the copy keeps active purchases', async () => {
+    const url = await start();
+    const buyer = await player(url, 'Покупатель');
+    const { a, view } = await adminView(url);
+    const active = view.game.id;
+    await call(a, 'admin:startGame');
+    await call(a, 'admin:adjustScore', { playerId: buyer.id, delta: 500 });
+    const added = nextEvent(a, 'state:admin', (v: AdminView) => v.shop.items.length === 1);
+    const item = { name: 'Метла', description: '', price: 100, quantity: 2, hidden: false };
+    expect(await call(a, 'admin:itemAdd', { gameId: active, item })).toEqual({ ok: true });
+    const itemId = (await added).shop.items[0].id;
+    expect(await call(a, 'admin:sell', { itemId, playerId: buyer.id })).toEqual({ ok: true });
+
+    const dup = await call(a, 'game:duplicate', { id: active });
+    expect(dup).toEqual({ ok: true, id: expect.stringMatching(GAME_ID) });
+    expect(readGame(dup.id).shop.map((i: { id: string }) => i.id)).toEqual([itemId]);
+    // The copy is inactive, so its sold count is 0; the active game still counts its sale.
+    expect(await call(a, 'admin:itemUpdate', { gameId: dup.id, id: itemId, item: { ...item, quantity: 1 } }))
+      .toEqual({ ok: true });
+    expect(await call(a, 'admin:itemUpdate', { gameId: active, id: itemId, item: { ...item, quantity: 1 } }))
+      .toEqual({ ok: true });
+    expect(await call(a, 'admin:itemUpdate', { gameId: active, id: itemId, item: { ...item, quantity: 0 } }))
+      .toEqual({ ok: false, error: 'INVALID_ITEM' });
+    expect(await call(a, 'admin:itemDelete', { gameId: dup.id, id: itemId })).toEqual({ ok: true });
+
+    const opened = nextEvent(a, 'state:admin', (v: AdminView) => v.editing?.id === dup.id);
+    expect(await call(a, 'game:open', { id: dup.id })).toEqual({ ok: true });
+    const v = await opened;
+    expect(v.editing!.shop).toEqual([]);
+    expect(v.shop.items.map((i) => i.id)).toEqual([itemId]);
+    expect(v.shop.purchases).toHaveLength(1);
+    expect(v.games.map((g) => g.title)).toContain('Сумеречный шабаш (копия)');
+  });
+
+  it('deleting an item in the active game drops its purchases', async () => {
+    const url = await start();
+    const buyer = await player(url, 'Покупатель');
+    const { a, view } = await adminView(url);
+    await call(a, 'admin:startGame');
+    await call(a, 'admin:adjustScore', { playerId: buyer.id, delta: 500 });
+    const added = nextEvent(a, 'state:admin', (v: AdminView) => v.shop.items.length === 1);
+    const item = { name: 'Метла', description: '', price: 100, quantity: 2, hidden: false };
+    await call(a, 'admin:itemAdd', { gameId: view.game.id, item });
+    const itemId = (await added).shop.items[0].id;
+    await call(a, 'admin:sell', { itemId, playerId: buyer.id });
+    const gone = nextEvent(a, 'state:admin', (v: AdminView) => v.shop.items.length === 0);
+    expect(await call(a, 'admin:itemDelete', { gameId: view.game.id, id: itemId })).toEqual({ ok: true });
+    expect((await gone).shop.purchases).toEqual([]);
+  });
+
+  it('item image must exist in the game media', async () => {
+    const url = await start();
+    const { a, view } = await adminView(url);
+    const id = view.game.id;
+    const item = { name: 'Метла', description: '', price: 1, quantity: 1, hidden: false, image: 'nope.jpg' };
+    expect(await call(a, 'admin:itemAdd', { gameId: id, item })).toEqual({ ok: false, error: 'INVALID_ITEM' });
+    const { file } = await (await postMedia(url, id, JPEG)).json() as { file: string };
+    const added = nextEvent(a, 'state:admin', (v: AdminView) => v.shop.items.length === 1);
+    expect(await call(a, 'admin:itemAdd', { gameId: id, item: { ...item, image: file } })).toEqual({ ok: true });
+    expect((await added).shop.items[0].imageUrl).toBe(`/games/${id}/media/${file}`);
+  });
+
+  it('broken active game.json: server starts on another game, broken one listed with error', async () => {
+    const url = await start();
+    const { a, view } = await adminView(url);
+    const broken = view.game.id;
+    const { id: spare } = await call(a, 'game:create', { title: 'Запасная' });
+    expect(await call(a, 'game:activate', { id: broken })).toEqual({ ok: true }); // writes state.json
+    fs.writeFileSync(gameJson(broken), '{');
+
+    await stop();
+    const { a: a2, view: v2 } = await adminView(await start());
+    expect(v2.game.id).toBe(spare);
+    expect(v2.games.find((g) => g.id === broken)).toMatchObject({ active: false, error: expect.any(String) });
+    expect(await call(a2, 'game:activate', { id: broken })).toEqual({ ok: false, error: 'GAME_BROKEN' });
+    expect(await call(a2, 'game:duplicate', { id: broken })).toEqual({ ok: false, error: 'GAME_BROKEN' });
+  });
+
+  it('only game broken: a new empty game becomes active', async () => {
+    const broken = gameIdOf(await connect(await start()));
+    await stop();
+    fs.writeFileSync(gameJson(broken), '{');
+    const { view } = await adminView(await start());
+    expect(view.game.id).not.toBe(broken);
+    expect(view.game.title).toBe('Новая игра');
+    expect(view.games).toHaveLength(2);
+  });
+});
+
+describe('game media', () => {
+  const big = (head: Buffer, size: number) => Buffer.concat([head, Buffer.alloc(size - head.length, 1)]);
+
+  it('upload checks PIN, then game, then type, then size', async () => {
+    const url = await start();
+    const id = gameIdOf(await connect(url));
+    expect((await postMedia(url, 'g-zzzzzzzz', JPEG, 'bad')).status).toBe(401);
+    expect((await postMedia(url, id, JPEG, 'bad')).status).toBe(401);
+    expect((await postMedia(url, 'g-zzzzzzzz', JPEG)).status).toBe(404);
+    expect((await postMedia(url, '..', JPEG)).status).toBe(404);
+    const bad = await postMedia(url, id, Buffer.from('hello'));
+    expect(bad.status).toBe(415);
+    expect(await bad.json()).toEqual({ error: 'UNSUPPORTED_TYPE' });
+    expect((await postMedia(url, id, Buffer.alloc(0))).status).toBe(415);
+    const tooBig = await postMedia(url, id, big(JPEG, 5 * 1024 * 1024 + 1));
+    expect(tooBig.status).toBe(413);
+    expect(await tooBig.json()).toEqual({ error: 'TOO_LARGE' });
+    const mp3 = await postMedia(url, id, big(Buffer.from('ID3'), 6 * 1024 * 1024));
+    expect(mp3.status).toBe(200);
+    expect((await mp3.json()).file).toMatch(/^[0-9a-f-]{36}\.mp3$/);
+    expect((await postMedia(url, id, big(Buffer.from('ID3'), 20 * 1024 * 1024 + 1))).status).toBe(413);
+  });
+
+  it('upload saves the file and serves it with safe headers', async () => {
+    const url = await start();
+    const id = gameIdOf(await connect(url));
+    const res = await postMedia(url, id, JPEG);
     expect(res.status).toBe(200);
-    const { url: imageUrl } = await res.json() as { url: string };
-    expect(imageUrl).toMatch(/^\/media\/shop\/[0-9a-f-]+\.png$/);
-    const got = await fetch(`${url}${imageUrl}`);
+    const body = await res.json() as { file: string; url: string };
+    expect(body.file).toMatch(/^[0-9a-f-]{36}\.jpg$/);
+    expect(body.url).toBe(`/games/${id}/media/${body.file}`);
+    const got = await fetch(url + body.url);
     expect(got.status).toBe(200);
-    expect(Buffer.from(await got.arrayBuffer())).toEqual(bytes);
+    expect(got.headers.get('content-security-policy'))
+      .toBe("default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; media-src 'self'; sandbox");
+    expect(got.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(Buffer.from(await got.arrayBuffer())).toEqual(JPEG);
   });
 
-  it('upload: wrong PIN → 401, nothing written', async () => {
+  it('serving never leaks game.json', async () => {
     const url = await start();
-    const res = await post(url, Buffer.from([1]), { 'X-Admin-Pin': 'bad', 'Content-Type': 'image/png' });
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: 'UNAUTHORIZED' });
-    const shopDir = path.join(mediaDir, 'shop');
-    expect(fs.existsSync(shopDir) ? fs.readdirSync(shopDir) : []).toEqual([]);
-  });
-
-  it('upload: text/plain → 415', async () => {
-    const url = await start();
-    const res = await post(url, Buffer.from('hi'), { 'X-Admin-Pin': PIN, 'Content-Type': 'text/plain' });
-    expect(res.status).toBe(415);
-    expect(await res.json()).toEqual({ error: 'UNSUPPORTED_TYPE' });
-  });
-
-  it('upload: 6 MB → 413', async () => {
-    const url = await start();
-    const res = await post(url, Buffer.alloc(6 * 1024 * 1024), { 'X-Admin-Pin': PIN, 'Content-Type': 'image/jpeg' });
-    expect(res.status).toBe(413);
-    expect(await res.json()).toEqual({ error: 'TOO_LARGE' });
+    const id = gameIdOf(await connect(url));
+    for (const p of [
+      `/games/${id}/game.json`,
+      `/games/${id}/media/..%2Fgame.json`,
+      `/games/${id}/media/%2e%2e%2fgame.json`,
+      `/games/${id}/media/..%5Cgame.json`,
+      `/games/${id}/media/missing.jpg`,
+      `/games/..%2F${id}/media/game.json`,
+      '/games/g-zzzzzzzz/media/x.jpg',
+    ]) {
+      const res = await fetch(url + p);
+      expect(res.status, p).toBe(404);
+      expect(await res.text(), p).not.toContain('СЕКРЕТНЫЙ-ОТВЕТ');
+    }
+    expect((await fetch(`${url}/api/shop/image`, { method: 'POST', body: new Uint8Array(JPEG) })).status).toBe(404);
   });
 });
 

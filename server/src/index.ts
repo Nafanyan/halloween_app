@@ -2,7 +2,6 @@ import os from 'node:os';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createQuizServer } from './server';
-import { QuestionsError } from './questions';
 import { ipv4Candidates, pickHostIp } from './lanIp';
 
 const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
@@ -12,23 +11,14 @@ const pin = process.env.ADMIN_PIN || String(randomInt(1000, 10000));
 const candidates = ipv4Candidates(os.networkInterfaces());
 const joinUrl = `http://${pickHostIp(candidates, process.env.HOST_IP)}:${port}/`;
 
-let server;
-try {
-  server = createQuizServer({
-    questionsPath: here('../data/questions.json'),
-    mediaDir: here('../data/media'),
-    statePath: process.env.STATE_PATH || here('../data/state.json'),
-    clientDist: here('../../client/dist'),
-    pin,
-    joinUrl,
-  });
-} catch (e) {
-  if (e instanceof QuestionsError) {
-    console.error(`Ошибка в вопросах: ${e.message}`);
-    process.exit(1);
-  }
-  throw e;
-}
+// Битые игры не мешают запуску: они видны в библиотеке с текстом ошибки.
+const server = createQuizServer({
+  dataDir: here('../data'),
+  statePath: process.env.STATE_PATH || here('../data/state.json'),
+  clientDist: here('../../client/dist'),
+  pin,
+  joinUrl,
+});
 
 server.httpServer.listen(port, () => {
   console.log('IPv4-адреса этого компьютера:');

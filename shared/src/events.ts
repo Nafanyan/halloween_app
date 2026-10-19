@@ -1,6 +1,8 @@
 import type {
-  Ack, AdminView, AudioAction, ErrorCode, PublicView, PurchasedEvent, QuestionId, ShopItemInput, Trophy,
+  Ack, AdminView, AudioAction, ErrorCode, GameSettings, PublicView, PurchasedEvent, QuestionId, ShopItemInput, Trophy,
 } from './types';
+
+export type IdAck = (r: { ok: true; id: string } | { ok: false; error: ErrorCode }) => void;
 
 export interface ClientToServerEvents {
   'player:join': (p: { name: string }, ack: (r: { ok: true; playerId: string } | { ok: false; error: ErrorCode }) => void) => void;
@@ -22,11 +24,17 @@ export interface ClientToServerEvents {
   'admin:newGame': (p: { removePlayers: boolean }, ack: Ack) => void;
   'admin:audio': (p: { action: AudioAction }, ack: Ack) => void;
   'admin:shopOpen': (p: { open: boolean }, ack: Ack) => void;
-  'admin:itemAdd': (p: { item: ShopItemInput }, ack: Ack) => void;
-  'admin:itemUpdate': (p: { id: string; item: ShopItemInput }, ack: Ack) => void;
-  'admin:itemDelete': (p: { id: string }, ack: Ack) => void;
+  'admin:itemAdd': (p: { gameId: string; item: ShopItemInput }, ack: Ack) => void;
+  'admin:itemUpdate': (p: { gameId: string; id: string; item: ShopItemInput }, ack: Ack) => void;
+  'admin:itemDelete': (p: { gameId: string; id: string }, ack: Ack) => void;
   'admin:sell': (p: { itemId: string; playerId: string }, ack: Ack) => void;
   'admin:cancelPurchase': (p: { purchaseId: string }, ack: Ack) => void;
+  'game:create': (p: { title: string }, ack: IdAck) => void;
+  'game:duplicate': (p: { id: string }, ack: IdAck) => void;
+  'game:delete': (p: { id: string }, ack: Ack) => void;
+  'game:activate': (p: { id: string }, ack: Ack) => void;
+  'game:open': (p: { id: string | null }, ack: Ack) => void;
+  'game:updateSettings': (p: { id: string; settings: GameSettings }, ack: Ack) => void;
 }
 export interface ServerToClientEvents {
   'state:public': (v: PublicView) => void;
