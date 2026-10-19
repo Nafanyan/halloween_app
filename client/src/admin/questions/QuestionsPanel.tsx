@@ -5,6 +5,7 @@ import {
   addQuestion, addRound, addTheme, moveQuestion, moveRound, moveTheme, removeQuestion, removeRound,
   removeTheme, renameRound, renameTheme, stripUrls, updateQuestion,
 } from './edit';
+import { NameRevision } from './NameInput';
 import { RoundBlock, type OpenKey } from './RoundBlock';
 
 export function QuestionsPanel({ edit }: { edit: GameEditView }) {
@@ -12,6 +13,7 @@ export function QuestionsPanel({ edit }: { edit: GameEditView }) {
   const [open, setOpen] = useState<OpenKey>(null);
   const latest = useRef(edit.rounds);
   latest.current = edit.rounds;
+  const [rev, setRev] = useState(0);
   const disabled = edit.locked;
 
   // Новая версия с сервера заменяет локальную; открытая форма держит своё состояние сама.
@@ -23,21 +25,22 @@ export function QuestionsPanel({ edit }: { edit: GameEditView }) {
     setRounds(edit.rounds);
   }, [edit.rounds]);
 
-  const save = (next: EditRound[]) => {
+  const save = (next: EditRound[], onOk?: () => void) => {
     if (next === rounds) return;
     setRounds(next);
     let ok = false;
-    call('game:updateRounds', { id: edit.id, rounds: stripUrls(next) }, () => { ok = true; }, () => {
-      if (!ok) setRounds(latest.current);
+    call('game:updateRounds', { id: edit.id, rounds: stripUrls(next) }, () => { ok = true; onOk?.(); }, () => {
+      if (!ok) { setRounds(latest.current); setRev((v) => v + 1); }
     });
   };
 
   const saveQuestion = (r: number, t: number, i: number | 'new', q: EditQuestion) => {
-    save(i === 'new' ? addQuestion(rounds, r, t, q) : updateQuestion(rounds, r, t, i, q));
-    setOpen(null);
+    // Форма закрывается только после ok; при отказе остаётся с введёнными полями.
+    save(i === 'new' ? addQuestion(rounds, r, t, q) : updateQuestion(rounds, r, t, i, q), () => setOpen(null));
   };
 
   return (
+    <NameRevision.Provider value={rev}>
     <section className="card q-panel">
       <h2>Вопросы</h2>
       {disabled && <p className="q-locked">Игра идёт — вопросы можно менять в лобби или после «Новой игры»</p>}
@@ -70,5 +73,6 @@ export function QuestionsPanel({ edit }: { edit: GameEditView }) {
         <button className="btn" disabled={disabled} onClick={() => { setOpen(null); save(addRound(rounds)); }}>+ Раунд</button>
       </div>
     </section>
+    </NameRevision.Provider>
   );
 }

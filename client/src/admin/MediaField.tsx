@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { showToast, uploadErrorMessage, uploadMedia } from './adminApi';
 import { downscaleImage } from './image';
+import { mediaKindOk } from './mediaKind';
 
 interface Props {
   label: string;
@@ -30,6 +31,10 @@ export function MediaField({ label, accept, url, gameId, disabled, onChange }: P
       }
       try {
         const res = await uploadMedia(gameId, blob);
+        if (!mediaKindOk(res.file, accept)) {
+          showToast('Этот формат не подходит');
+          return;
+        }
         setPreview(res.url);
         onChange(res.file);
       } catch (err) {

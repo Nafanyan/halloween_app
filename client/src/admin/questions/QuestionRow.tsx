@@ -14,8 +14,8 @@ export function QuestionRow({ q, disabled, first, last, onEdit, onMove, onRemove
   return (
     <div className="admin-row">
       <strong>{q.value}</strong>
-      <span className="q-text">{q.text}</span>
-      <span className="muted">{q.image ? 'img ' : ''}{q.audio ? 'mp3' : ''}</span>
+      <span className="q-text">{q.text.length > 60 ? `${q.text.slice(0, 60)}…` : q.text}</span>
+      <span className="muted">{q.image ? '🖼' : ''}{q.audio ? '🎵' : ''}</span>
       <button className="btn small" disabled={disabled || first} onClick={() => onMove(-1)}>↑</button>
       <button className="btn small" disabled={disabled || last} onClick={() => onMove(1)}>↓</button>
       <button className="btn small" disabled={disabled} onClick={onEdit}>Изменить</button>
