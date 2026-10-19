@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { loadQuestions, findQuestion, questionId, QuestionsError } from '../src/questions';
+import { loadQuestions, round, findQuestion, questionId, QuestionsError } from '../src/questions';
 
 let dir: string;
 let file: string;
@@ -52,6 +52,10 @@ describe('loadQuestions', () => {
   it('rejects empty rounds', () => {
     write({ rounds: [] });
     expect(() => loadQuestions(file, media)).toThrow(QuestionsError);
+  });
+
+  it('round() accepts empty themes and questions', () => {
+    expect(round({ name: 'Р', themes: [{ name: 'Т', questions: [] }] }, 'rounds[0]', media).themes[0].questions).toEqual([]);
   });
 
   it('rejects invalid JSON', () => {

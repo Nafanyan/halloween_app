@@ -4,6 +4,9 @@ export type QuestionId = string; // `${round}/${theme}/${question}`, e.g. "0/1/2
 export interface Question { value: number; text: string; answer: string; image?: string; audio?: string }
 export interface Theme { name: string; questions: Question[] }
 export interface Round { name: string; themes: Theme[] }
+export interface EditQuestion extends Question { imageUrl?: string; audioUrl?: string }
+export interface EditTheme { name: string; questions: EditQuestion[] }
+export interface EditRound { name: string; themes: EditTheme[] }
 export interface QuestionPack { rounds: Round[] }
 
 export interface Player { id: string; name: string; score: number; online: boolean; avatar?: string }
@@ -33,14 +36,16 @@ export interface GameEditView {
   id: string; active: boolean; settings: GameSettings;
   media: { lobbyMusic?: string; background?: string };
   shop: AdminShopItem[];
-  rounds: { name: string; themes: number; questions: number }[];
+  rounds: EditRound[];
+  locked: boolean;
 }
 
 export type ErrorCode = 'NAME_EMPTY' | 'NAME_TOO_LONG' | 'NAME_TAKEN' | 'NOT_FOUND'
   | 'WRONG_PHASE' | 'QUESTION_ACTIVE' | 'ALREADY_PLAYED' | 'NO_ACTIVE'
   | 'NO_ANSWERER' | 'CANNOT_BUZZ' | 'INVALID_POINTS' | 'UNAUTHORIZED'
   | 'INVALID_ITEM' | 'SOLD_OUT' | 'NOT_ENOUGH_POINTS' | 'INVALID_IMAGE'
-  | 'NO_QUESTIONS' | 'GAME_BROKEN' | 'GAME_ACTIVE' | 'INVALID_SETTINGS' | 'SAVE_FAILED';
+  | 'NO_QUESTIONS' | 'GAME_BROKEN' | 'GAME_ACTIVE' | 'INVALID_SETTINGS' | 'SAVE_FAILED'
+  | 'GAME_LOCKED' | 'INVALID_QUESTIONS';
 export type Result = { ok: true; state: GameState } | { ok: false; error: ErrorCode };
 
 export interface CellView { id: QuestionId; value: number; played: boolean }

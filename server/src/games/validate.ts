@@ -1,4 +1,4 @@
-import type { GameDef, GameSettings, ShopItem } from '@quiz/shared';
+import type { GameDef, GameSettings, Round, ShopItem } from '@quiz/shared';
 import { QuestionsError, media, round } from '../questions';
 import { parseItem } from '../game/shop';
 
@@ -52,13 +52,17 @@ function shopItem(v: unknown, p: string, mediaDir: string, seen: Set<string>): S
   return { ...item, id };
 }
 
+export function parseRounds(raw: unknown, mediaDir: string): Round[] {
+  if (!Array.isArray(raw)) return fail('rounds', 'ожидается массив');
+  return raw.map((x, i) => round(x, `rounds[${i}]`, mediaDir));
+}
+
 export function parseGame(raw: unknown, mediaDir: string): GameDef {
   if (!isObj(raw)) return fail('game', 'ожидается объект');
   if (raw.version !== 1) fail('version', 'ожидается 1');
   const s = settings(raw, mediaDir);
-  if (!Array.isArray(raw.rounds)) fail('rounds', 'ожидается массив');
+  const rounds = parseRounds(raw.rounds, mediaDir);
   if (!Array.isArray(raw.shop)) fail('shop', 'ожидается массив');
-  const rounds = (raw.rounds as unknown[]).map((x, i) => round(x, `rounds[${i}]`, mediaDir));
   const seen = new Set<string>();
   const shop = (raw.shop as unknown[]).map((x, i) => shopItem(x, `shop[${i}]`, mediaDir, seen));
   return { version: 1, ...s, rounds, shop };
